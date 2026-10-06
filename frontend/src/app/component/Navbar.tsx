@@ -9,41 +9,28 @@ import { HiOutlineBars3 } from "react-icons/hi2";
 
 import logo from "../assets/logo.png";
 
-
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-background/10 bg-primary">
+    <header className="border-background/10 bg-primary sticky top-0 z-50 border-b">
       <div className="relative mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-        
-        <Image
-        src={logo}
-        alt="Logo"
-        className="h-15 w-auto lg:h-20"
-        priority
-        />
+        <Image src={logo} alt="Logo" className="h-15 w-auto lg:h-20" priority />
 
         <button
-            type="button"
-            onClick={() => setIsOpen((previous) => !previous)}
-            aria-label={isOpen ? "Close navigation" : "Open navigation"}
-            aria-expanded={isOpen}
-            aria-controls="main-navigation"
-            className={`
-                rounded-xl border p-2 text-background
-                transition-colors duration-200
-                focus-visible:outline-2 focus-visible:outline-offset-2
-                focus-visible:outline-background lg:hidden
-                ${
-                isOpen
-                    ? "border-background/25 bg-background/15 backdrop-blur-xl shadow-[inset_0_1px_0_rgb(255_255_255/0.2)]"
-                    : "border-transparent hover:bg-background/10"
-                }
-            `}
-            >
-            <HiOutlineBars3 className="h-7 w-7" aria-hidden="true" />
-            </button>
+          type="button"
+          onClick={() => setIsOpen((previous) => !previous)}
+          aria-label={isOpen ? "Close navigation" : "Open navigation"}
+          aria-expanded={isOpen}
+          aria-controls="main-navigation"
+          className={`text-background focus-visible:outline-background rounded-xl border p-2 transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 lg:hidden ${
+            isOpen
+              ? "border-background/25 bg-background/15 shadow-[inset_0_1px_0_rgb(255_255_255/0.2)] backdrop-blur-xl"
+              : "hover:bg-background/10 border-transparent"
+          } `}
+        >
+          <HiOutlineBars3 className="h-7 w-7" aria-hidden="true" />
+        </button>
 
         <nav
           id="main-navigation"
@@ -53,17 +40,7 @@ export default function Navbar() {
               setIsOpen(false);
             }
           }}
-          className={`
-            ${isOpen ? "flex" : "hidden"}
-            absolute inset-x-4 top-full mt-2
-            flex-col items-stretch gap-1 rounded-2xl
-            border border-background/40 bg-background/90 p-2
-            shadow-[0_4px_20px_rgb(0_0_0/0.15),inset_0_1px_0_rgb(255_255_255/0.5)]
-            backdrop-blur-xl sm:inset-x-6
-            lg:static lg:mt-0 lg:flex lg:flex-row
-            lg:items-center lg:justify-evenly lg:rounded-full
-            lg:p-1.5 xl:w-1/2
-          `}
+          className={` ${isOpen ? "flex" : "hidden"} border-background/40 bg-background/90 absolute inset-x-4 top-full mt-2 flex-col items-stretch gap-1 rounded-2xl border p-2 shadow-[0_4px_20px_rgb(0_0_0/0.15),inset_0_1px_0_rgb(255_255_255/0.5)] backdrop-blur-xl sm:inset-x-6 lg:static lg:mt-0 lg:flex lg:flex-row lg:items-center lg:justify-evenly lg:rounded-full lg:p-1.5 xl:w-1/2`}
         >
           <NavLink href="/jobs">Explore</NavLink>
           <NavLink href="/saved-jobs">Saved</NavLink>

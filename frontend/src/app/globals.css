@@ -42,8 +42,7 @@ body {
 }
 
 .intro-image {
-  animation: intro-image-enter 800ms cubic-bezier(0.22, 1, 0.36, 1)
-    200ms both;
+  animation: intro-image-enter 800ms cubic-bezier(0.22, 1, 0.36, 1) 200ms both;
 }
 
 @media (prefers-reduced-motion: reduce) {
