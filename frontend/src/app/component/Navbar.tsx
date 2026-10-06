@@ -14,7 +14,7 @@ export default function Navbar() {
 
   return (
     <header className="border-background/10 bg-primary sticky top-0 z-50 border-b">
-      <div className="relative mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+      <div className="relative mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
         <Image src={logo} alt="Logo" className="h-15 w-auto lg:h-20" priority />
 
         <button
@@ -40,7 +40,7 @@ export default function Navbar() {
               setIsOpen(false);
             }
           }}
-          className={` ${isOpen ? "flex" : "hidden"} border-background/40 bg-background/90 absolute inset-x-4 top-full mt-2 flex-col items-stretch gap-1 rounded-2xl border p-2 shadow-[0_4px_20px_rgb(0_0_0/0.15),inset_0_1px_0_rgb(255_255_255/0.5)] backdrop-blur-xl sm:inset-x-6 lg:static lg:mt-0 lg:flex lg:flex-row lg:items-center lg:justify-evenly lg:rounded-full lg:p-1.5 xl:w-1/2`}
+          className={`${isOpen ? "flex" : "hidden"} border-background/40 bg-background/90 absolute inset-x-4 top-full mt-2 min-h-80 flex-col items-stretch justify-evenly gap-1 rounded-2xl border p-2 shadow-[0_4px_20px_rgb(0_0_0/0.15),inset_0_1px_0_rgb(255_255_255/0.5)] backdrop-blur-xl sm:inset-x-6 lg:static lg:mt-0 lg:flex lg:min-h-0 lg:flex-row lg:items-center lg:justify-evenly lg:rounded-full lg:p-1.5 xl:w-1/2`}
         >
           <NavLink href="/jobs">Explore</NavLink>
           <NavLink href="/saved-jobs">Saved</NavLink>

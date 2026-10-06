@@ -5,7 +5,7 @@ import introImage from "../assets/intro.png";
 
 export default function Intro() {
   return (
-    <section className="from-primary via-muted to-background bg-linear-to-b from-58% via-75% to-100% px-4 pt-8 pb-12 sm:px-6 sm:pt-12 sm:pb-20 lg:px-8 lg:pt-16 lg:pb-20">
+    <section className="from-primary via-muted to-background bg-linear-to-b from-67% via-75% to-100% px-4 pt-8 pb-12 sm:px-6 sm:pt-12 sm:pb-20 lg:px-8 lg:pt-10 lg:pb-20">
       <div className="mx-auto max-w-7xl">
         <div className="flex items-center justify-around gap-3">
           <h1 className="text-background max-w-xl text-2xl leading-tight font-medium tracking-tight sm:text-3xl lg:text-4xl">
@@ -21,7 +21,7 @@ export default function Intro() {
           <Image
             src={introImage}
             alt=""
-            className="intro-image hidden h-auto shrink-0 object-contain md:block md:w-48 lg:w-90"
+            className="intro-image hidden h-auto shrink-0 object-contain md:block md:w-48 lg:w-85"
             priority
           />
         </div>
@@ -31,7 +31,7 @@ export default function Intro() {
           method="GET"
           role="search"
           aria-label="Search developer jobs"
-          className="border-border bg-background shadow-primary/10 relative mt-8 flex flex-col gap-3 rounded-3xl border p-3 shadow-xl sm:flex-row sm:items-center sm:gap-0 sm:rounded-full sm:p-2"
+          className="border-border bg-background shadow-primary/10 relative mt-8 flex flex-col gap-3 rounded-3xl border p-3 shadow-xl sm:mt-12 sm:flex-row sm:items-center sm:gap-0 sm:rounded-full sm:p-2 lg:mt-12"
         >
           <div className="flex min-w-0 flex-1 items-center gap-3 px-3">
             <HiOutlineMagnifyingGlass
