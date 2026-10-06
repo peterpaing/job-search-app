@@ -6,6 +6,11 @@
   --color-muted: #555555;
   --color-primary: #171717;
   --color-border: #e2e2e2;
+  --color-accent: #2563eb;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
 }
 
 body {
