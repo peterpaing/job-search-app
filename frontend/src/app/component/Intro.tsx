@@ -5,9 +5,9 @@ import introImage from "../assets/intro.png";
 
 export default function Intro() {
   return (
-    <section className="from-primary via-muted to-background bg-linear-to-b from-50% via-75% to-100% px-4 pt-8 pb-12 sm:px-6 sm:pt-12 sm:pb-20 lg:px-8 lg:pt-10 lg:pb-20">
+    <section className="from-primary via-muted to-background bg-linear-to-b from-50% via-76% to-100% px-4 pt-10 pb-6 sm:px-6 sm:pt-8 sm:pb-12 lg:px-8 lg:pt-8 lg:pb-12">
       <div className="mx-auto max-w-7xl">
-        <div className="flex items-center justify-between gap-6">
+        <div className="flex items-center justify-around gap-6">
           <div className="min-w-0">
             <h1 className="text-background text-2xl leading-tight font-medium tracking-tight sm:text-3xl lg:text-4xl">
               <span className="typing-text inline-block">
@@ -28,7 +28,7 @@ export default function Intro() {
           <Image
             src={introImage}
             alt=""
-            className="intro-image hidden h-auto shrink-0 object-contain md:block md:w-48 lg:w-85"
+            className="intro-image hidden h-40 w-auto shrink-0 object-contain md:block lg:h-48"
             priority
           />
         </div>
@@ -38,7 +38,7 @@ export default function Intro() {
           method="GET"
           role="search"
           aria-label="Search developer jobs"
-          className="border-border bg-background shadow-primary/10 relative mt-8 flex flex-col gap-3 rounded-3xl border p-3 shadow-xl sm:mt-12 sm:flex-row sm:items-center sm:gap-0 sm:rounded-full sm:p-2 lg:mt-12"
+          className="border-border bg-background shadow-primary/10 relative mt-6 flex flex-col gap-3 rounded-3xl border p-3 shadow-xl sm:mt-8 sm:flex-row sm:items-center sm:gap-0 sm:rounded-full sm:p-2"
         >
           <div className="flex min-w-0 flex-1 items-center gap-3 px-3">
             <HiOutlineMagnifyingGlass
