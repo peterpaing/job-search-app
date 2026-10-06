@@ -5,21 +5,23 @@ import introImage from "../assets/intro.png";
 
 export default function Intro() {
   return (
-    <section className="bg-linear-to-b from-primary from-50% via-muted via-75% to-background to-100% px-4 pt-8 pb-12 sm:px-6 sm:pt-12 sm:pb-20 lg:px-8 lg:pt-16 lg:pb-20">
+    <section className="bg-linear-to-b from-primary from-55% via-muted via-75% to-background to-100% px-4 pt-8 pb-12 sm:px-6 sm:pt-12 sm:pb-20 lg:px-8 lg:pt-16 lg:pb-20">
       <div className="mx-auto max-w-7xl">
         <div className="flex items-center justify-around gap-3">
-          <h1 className="max-w-xl text-2xl leading-tight font-medium tracking-tight text-background sm:text-3xl lg:text-4xl">
+        <h1 className="max-w-xl text-2xl leading-tight font-medium tracking-tight text-background sm:text-3xl lg:text-4xl">
+        <span className="typing-text inline-block">
           Find Your Dream Dev Jobs Here{" "}
           <PiStarFourFill
-            className="inline-block h-6 w-4 align-middle sm:h-8 sm:w-8"
+            className="inline-block h-6 w-6 align-middle sm:h-8 sm:w-8"
             aria-hidden="true"
           />
-        </h1>
+        </span>
+      </h1>
 
       <Image
         src={introImage}
         alt=""
-        className="hidden h-auto shrink-0 object-contain md:block md:w-48 lg:w-80"
+        className="intro-image hidden h-auto shrink-0 object-contain md:block md:w-48 lg:w-90"
         priority
       />
         </div>
