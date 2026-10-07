@@ -1,241 +1,116 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getJobs } from "../../services/jobs.service.js";
+import { getRemoteOkJobs } from "../../services/remote-ok.service.js";
+import { getHimalayasJobs } from "../../services/himalayas.service.js";
 
-const metadata = {
-  last_updated: 1791331200,
-  legal: "API terms",
-};
+vi.mock("../../services/remote-ok.service.js", () => ({
+  getRemoteOkJobs: vi.fn(),
+}));
 
-const validJob = {
-  id: "123",
-  position: "Frontend Engineer",
+vi.mock("../../services/himalayas.service.js", () => ({
+  getHimalayasJobs: vi.fn(),
+}));
+
+const remoteOkMock = vi.mocked(getRemoteOkJobs);
+const himalayasMock = vi.mocked(getHimalayasJobs);
+
+const remoteOkJob = {
+  id: "remote-ok-123",
+  source: "Remote OK",
+  title: "Frontend Engineer",
   company: "Example",
-  company_logo: "https://example.com/logo.png",
+  companyLogo: null,
   location: "Singapore",
-  tags: ["react", "typescript"],
+  tags: ["react"],
   url: "https://remoteok.com/remote-jobs/example-123",
-  date: "2026-10-07T00:00:00Z",
+  postedAt: "2026-10-08T00:00:00Z",
 };
 
-const fetchMock = vi.fn<typeof fetch>();
-
-function mockResponse(payload: unknown, status = 200) {
-  fetchMock.mockResolvedValueOnce(
-    new Response(JSON.stringify(payload), {
-      status,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-}
+const himalayasJob = {
+  id: "himalayas-example-456",
+  source: "Himalayas",
+  title: "Backend Developer",
+  company: "Another Company",
+  companyLogo: null,
+  location: "Malaysia",
+  tags: ["Node.js"],
+  url: "https://himalayas.app/companies/example/jobs/backend-developer",
+  postedAt: "2026-10-08T00:00:00.000Z",
+};
 
 describe("getJobs", () => {
   beforeEach(() => {
-    fetchMock.mockReset();
-    vi.stubGlobal("fetch", fetchMock);
+    remoteOkMock.mockReset();
+    himalayasMock.mockReset();
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
-  it("requests the Remote OK API with JSON headers and an abort signal", async () => {
-    mockResponse([metadata, validJob]);
+  it("combines jobs from both sources", async () => {
+    remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
+    himalayasMock.mockResolvedValueOnce([himalayasJob]);
+
+    await expect(getJobs()).resolves.toEqual([remoteOkJob, himalayasJob]);
+
+    expect(remoteOkMock).toHaveBeenCalledTimes(1);
+    expect(himalayasMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns Himalayas jobs when Remote OK fails", async () => {
+    const error = new Error("Remote OK unavailable");
+
+    remoteOkMock.mockRejectedValueOnce(error);
+    himalayasMock.mockResolvedValueOnce([himalayasJob]);
+
+    await expect(getJobs()).resolves.toEqual([himalayasJob]);
+
+    expect(console.error).toHaveBeenCalledWith("Job source failed:", error);
+  });
+
+  it("returns Remote OK jobs when Himalayas fails", async () => {
+    remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
+    himalayasMock.mockRejectedValueOnce(new Error("Himalayas unavailable"));
+
+    await expect(getJobs()).resolves.toEqual([remoteOkJob]);
+  });
+
+  it("throws when both sources fail", async () => {
+    remoteOkMock.mockRejectedValueOnce(new Error("Remote OK failed"));
+    himalayasMock.mockRejectedValueOnce(new Error("Himalayas failed"));
+
+    await expect(getJobs()).rejects.toThrow("All job sources failed");
+  });
+
+  it("returns an empty array when both sources succeed with no jobs", async () => {
+    remoteOkMock.mockResolvedValueOnce([]);
+    himalayasMock.mockResolvedValueOnce([]);
+
+    await expect(getJobs()).resolves.toEqual([]);
+  });
+
+  it("returns jobs when the other source succeeds with an empty array", async () => {
+    remoteOkMock.mockResolvedValueOnce([]);
+    himalayasMock.mockResolvedValueOnce([himalayasJob]);
+
+    await expect(getJobs()).resolves.toEqual([himalayasJob]);
+  });
+
+  it("does not throw when one source fails and the other returns no jobs", async () => {
+    remoteOkMock.mockRejectedValueOnce(new Error("Remote OK failed"));
+    himalayasMock.mockResolvedValueOnce([]);
+
+    await expect(getJobs()).resolves.toEqual([]);
+  });
+
+  it("does not log errors when both sources succeed", async () => {
+    remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
+    himalayasMock.mockResolvedValueOnce([himalayasJob]);
 
     await getJobs();
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith("https://remoteok.com/api", {
-      headers: { Accept: "application/json" },
-      signal: expect.any(AbortSignal),
-    });
-  });
-
-  it("maps a valid job into the frontend response format", async () => {
-    mockResponse([metadata, validJob]);
-
-    await expect(getJobs()).resolves.toEqual([
-      {
-        id: "remote-ok-123",
-        source: "Remote OK",
-        title: "Frontend Engineer",
-        company: "Example",
-        location: "Singapore",
-        tags: ["react", "typescript"],
-        url: validJob.url,
-        postedAt: validJob.date,
-        companyLogo: validJob.company_logo,
-      },
-    ]);
-  });
-
-  it.each([
-    "Frontend Engineer",
-    "Backend Developer",
-    "Full-stack Engineer",
-    "Software Engineer",
-    "Senior .NET Software Engineer",
-    "Mobile Developer",
-    "iOS Engineer",
-    "Android Developer",
-    "Game Developer",
-    "Programmer",
-    "FRONTEND ENGINEER",
-  ])("includes developer title: %s", async (position) => {
-    mockResponse([metadata, { ...validJob, position }]);
-
-    const jobs = await getJobs();
-
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0].title).toBe(position);
-  });
-
-  it.each([
-    "Marketing Manager",
-    "Sales Representative",
-    "Customer Support Specialist",
-    "Graphic Designer",
-    "Mechanical Engineer",
-  ])("excludes unrelated title: %s", async (position) => {
-    mockResponse([metadata, { ...validJob, position }]);
-
-    await expect(getJobs()).resolves.toEqual([]);
-  });
-
-  it("does not include an unrelated role just because it has developer tags", async () => {
-    mockResponse([
-      metadata,
-      {
-        ...validJob,
-        position: "Marketing Manager",
-        tags: ["developer", "react"],
-      },
-    ]);
-
-    await expect(getJobs()).resolves.toEqual([]);
-  });
-
-  it("filters unrelated jobs from a mixed response", async () => {
-    mockResponse([
-      metadata,
-      validJob,
-      { ...validJob, id: "456", position: "Marketing Manager" },
-      { ...validJob, id: "789", position: "Backend Developer" },
-    ]);
-
-    const jobs = await getJobs();
-
-    expect(jobs.map((job) => job.id)).toEqual([
-      "remote-ok-123",
-      "remote-ok-789",
-    ]);
-  });
-
-  it("trims the location and company logo", async () => {
-    mockResponse([
-      metadata,
-      {
-        ...validJob,
-        location: "  Singapore  ",
-        company_logo: "  https://example.com/logo.png  ",
-      },
-    ]);
-
-    const [job] = await getJobs();
-
-    expect(job.location).toBe("Singapore");
-    expect(job.companyLogo).toBe("https://example.com/logo.png");
-  });
-
-  it("converts blank location and logo strings to null", async () => {
-    mockResponse([
-      metadata,
-      {
-        ...validJob,
-        location: "   ",
-        company_logo: "",
-      },
-    ]);
-
-    const [job] = await getJobs();
-
-    expect(job.location).toBeNull();
-    expect(job.companyLogo).toBeNull();
-  });
-
-  it("handles missing optional fields", async () => {
-    mockResponse([
-      metadata,
-      {
-        id: validJob.id,
-        position: validJob.position,
-        company: validJob.company,
-        url: validJob.url,
-        date: validJob.date,
-      },
-    ]);
-
-    const [job] = await getJobs();
-
-    expect(job.location).toBeNull();
-    expect(job.companyLogo).toBeNull();
-    expect(job.tags).toEqual([]);
-  });
-
-  it("keeps all tags for the frontend to limit", async () => {
-    const tags = ["react", "typescript", "frontend", "javascript", "css"];
-
-    mockResponse([metadata, { ...validJob, tags }]);
-
-    const [job] = await getJobs();
-
-    expect(job.tags).toEqual(tags);
-  });
-
-  it("returns no jobs for a metadata-only response", async () => {
-    mockResponse([metadata]);
-
-    await expect(getJobs()).resolves.toEqual([]);
-  });
-
-  it("throws when the API returns an unsuccessful status", async () => {
-    mockResponse({ message: "Unavailable" }, 503);
-
-    await expect(getJobs()).rejects.toThrow("Remote OK request failed: 503");
-  });
-
-  it("propagates a network failure", async () => {
-    fetchMock.mockRejectedValueOnce(new Error("Network failure"));
-
-    await expect(getJobs()).rejects.toThrow("Network failure");
-  });
-
-  it("propagates a timeout failure", async () => {
-    fetchMock.mockRejectedValueOnce(
-      new DOMException("Request timed out", "TimeoutError"),
-    );
-
-    await expect(getJobs()).rejects.toMatchObject({
-      name: "TimeoutError",
-    });
-  });
-
-  it("rejects invalid job data", async () => {
-    mockResponse([metadata, { ...validJob, id: 123 }]);
-
-    await expect(getJobs()).rejects.toThrow();
-  });
-
-  it("rejects a response that is not an array", async () => {
-    mockResponse({ jobs: [validJob] });
-
-    await expect(getJobs()).rejects.toThrow();
-  });
-
-  it("rejects malformed JSON", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response("not valid JSON", { status: 200 }),
-    );
-
-    await expect(getJobs()).rejects.toThrow(SyntaxError);
+    expect(console.error).not.toHaveBeenCalled();
   });
 });
