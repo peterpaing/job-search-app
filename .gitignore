@@ -1,0 +1,16 @@
+# Dependencies in both folders
+node_modules/
+
+# Build output
+.next/
+dist/
+out/
+coverage/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
