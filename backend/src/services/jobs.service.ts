@@ -1,13 +1,23 @@
+import { getWeWorkRemotelyJobs } from "./we-work-remotely.service.js";
 import { getRemoteOkJobs } from "./remote-ok.service.js";
 import { getHimalayasJobs } from "./himalayas.service.js";
+import { getDevGlobalJobs } from "./dev-global-jobs.service.js";
 
-export async function getJobs() {
+type Job =
+  | Awaited<ReturnType<typeof getWeWorkRemotelyJobs>>[number]
+  | Awaited<ReturnType<typeof getRemoteOkJobs>>[number]
+  | Awaited<ReturnType<typeof getHimalayasJobs>>[number]
+  | Awaited<ReturnType<typeof getDevGlobalJobs>>[number];
+
+export async function getJobs(): Promise<Job[]> {
   const results = await Promise.allSettled([
-    getRemoteOkJobs(),
     getHimalayasJobs(),
+    getDevGlobalJobs(),
+    getWeWorkRemotelyJobs(),
+    getRemoteOkJobs(),
   ]);
 
-  const jobs: Awaited<ReturnType<typeof getRemoteOkJobs>> = [];
+  const jobs: Job[] = [];
   let successfulSources = 0;
 
   for (const result of results) {

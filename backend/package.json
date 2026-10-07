@@ -24,6 +24,7 @@
     "cors": "^2.8.6",
     "dotenv": "^18.0.6",
     "express": "^5.2.1",
+    "rss-parser": "^3.13.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {

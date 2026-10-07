@@ -1,49 +1,97 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getJobs } from "../../services/jobs.service.js";
-import { getRemoteOkJobs } from "../../services/remote-ok.service.js";
 import { getHimalayasJobs } from "../../services/himalayas.service.js";
-
-vi.mock("../../services/remote-ok.service.js", () => ({
-  getRemoteOkJobs: vi.fn(),
-}));
+import { getDevGlobalJobs } from "../../services/dev-global-jobs.service.js";
+import { getWeWorkRemotelyJobs } from "../../services/we-work-remotely.service.js";
+import { getRemoteOkJobs } from "../../services/remote-ok.service.js";
 
 vi.mock("../../services/himalayas.service.js", () => ({
   getHimalayasJobs: vi.fn(),
 }));
 
-const remoteOkMock = vi.mocked(getRemoteOkJobs);
-const himalayasMock = vi.mocked(getHimalayasJobs);
+vi.mock("../../services/dev-global-jobs.service.js", () => ({
+  getDevGlobalJobs: vi.fn(),
+}));
 
-const remoteOkJob = {
-  id: "remote-ok-123",
-  source: "Remote OK",
+vi.mock("../../services/we-work-remotely.service.js", () => ({
+  getWeWorkRemotelyJobs: vi.fn(),
+}));
+
+vi.mock("../../services/remote-ok.service.js", () => ({
+  getRemoteOkJobs: vi.fn(),
+}));
+
+const himalayasMock = vi.mocked(getHimalayasJobs);
+const devGlobalMock = vi.mocked(getDevGlobalJobs);
+const wwrMock = vi.mocked(getWeWorkRemotelyJobs);
+const remoteOkMock = vi.mocked(getRemoteOkJobs);
+
+const himalayasJob = {
+  id: "himalayas-123",
+  source: "Himalayas",
   title: "Frontend Engineer",
   company: "Example",
   companyLogo: null,
   location: "Singapore",
-  tags: ["react"],
-  url: "https://remoteok.com/remote-jobs/example-123",
-  postedAt: "2026-10-08T00:00:00Z",
+  tags: ["React"],
+  seniority: ["Senior"],
+  employmentType: "Full Time",
+  url: "https://himalayas.app/companies/example/jobs/frontend-engineer",
+  postedAt: "2026-10-08T00:00:00.000Z",
 };
 
-const himalayasJob = {
-  id: "himalayas-example-456",
-  source: "Himalayas",
+const devGlobalJob = {
+  id: "dev-global-jobs-456",
+  source: "Dev Global Jobs",
   title: "Backend Developer",
   company: "Another Company",
   companyLogo: null,
   location: "Malaysia",
-  tags: ["Node.js"],
-  seniority: ["Senior"],
-  employmentType: "Full Time",
-  url: "https://himalayas.app/companies/example/jobs/backend-developer",
+  country: "MY",
+  tags: ["technology"],
+  seniority: [],
+  employmentType: "Full-time",
+  url: "https://devglobaljobs.com/jobs/detail/456",
+  postedAt: "2026-10-08T00:00:00Z",
+};
+
+const wwrJob = {
+  id: "we-work-remotely-789",
+  source: "We Work Remotely",
+  title: "Software Engineer",
+  company: "Remote Company",
+  companyLogo: null,
+  location: "Anywhere in the World",
+  tags: ["Full-Stack Programming"],
+  url: "https://weworkremotely.com/remote-jobs/example-software-engineer",
   postedAt: "2026-10-08T00:00:00.000Z",
+};
+
+const remoteOkJob = {
+  id: "remote-ok-101",
+  source: "Remote OK",
+  title: "Mobile Developer",
+  company: "Mobile Company",
+  companyLogo: null,
+  location: null,
+  tags: ["mobile"],
+  url: "https://remoteok.com/remote-jobs/example-101",
+  postedAt: "2026-10-08T00:00:00Z",
 };
 
 describe("getJobs", () => {
   beforeEach(() => {
-    remoteOkMock.mockReset();
     himalayasMock.mockReset();
+    devGlobalMock.mockReset();
+    wwrMock.mockReset();
+    remoteOkMock.mockReset();
+
+    // Each source succeeds with no jobs unless a test overrides it.
+    himalayasMock.mockResolvedValue([]);
+    devGlobalMock.mockResolvedValue([]);
+    wwrMock.mockResolvedValue([]);
+    remoteOkMock.mockResolvedValue([]);
+
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -51,101 +99,201 @@ describe("getJobs", () => {
     vi.restoreAllMocks();
   });
 
-  it("combines jobs from both sources", async () => {
-    remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
+  it("combines all sources in the configured priority order", async () => {
     himalayasMock.mockResolvedValueOnce([himalayasJob]);
+    devGlobalMock.mockResolvedValueOnce([devGlobalJob]);
+    wwrMock.mockResolvedValueOnce([wwrJob]);
+    remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
 
-    await expect(getJobs()).resolves.toEqual([remoteOkJob, himalayasJob]);
+    await expect(getJobs()).resolves.toEqual([
+      himalayasJob,
+      devGlobalJob,
+      wwrJob,
+      remoteOkJob,
+    ]);
 
-    expect(remoteOkMock).toHaveBeenCalledTimes(1);
     expect(himalayasMock).toHaveBeenCalledTimes(1);
+    expect(devGlobalMock).toHaveBeenCalledTimes(1);
+    expect(wwrMock).toHaveBeenCalledTimes(1);
+    expect(remoteOkMock).toHaveBeenCalledTimes(1);
   });
 
-  it("preserves Himalayas seniority and employment type", async () => {
+  it("preserves priority even when Himalayas finishes last", async () => {
+    let resolveHimalayas!: (
+      jobs: Awaited<ReturnType<typeof getHimalayasJobs>>,
+    ) => void;
+
+    himalayasMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveHimalayas = resolve;
+      }),
+    );
+
+    devGlobalMock.mockResolvedValueOnce([devGlobalJob]);
+    wwrMock.mockResolvedValueOnce([wwrJob]);
     remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
+
+    const result = getJobs();
+
+    expect(devGlobalMock).toHaveBeenCalledTimes(1);
+    expect(wwrMock).toHaveBeenCalledTimes(1);
+    expect(remoteOkMock).toHaveBeenCalledTimes(1);
+
+    // Let the other sources settle before resolving Himalayas.
+    await Promise.resolve();
+    resolveHimalayas([himalayasJob]);
+
+    await expect(result).resolves.toEqual([
+      himalayasJob,
+      devGlobalJob,
+      wwrJob,
+      remoteOkJob,
+    ]);
+  });
+
+  it("preserves the order of jobs within a source", async () => {
+    const secondJob = {
+      ...himalayasJob,
+      id: "himalayas-124",
+      title: "Backend Developer",
+    };
+
+    himalayasMock.mockResolvedValueOnce([himalayasJob, secondJob]);
+    devGlobalMock.mockResolvedValueOnce([devGlobalJob]);
+
+    await expect(getJobs()).resolves.toEqual([
+      himalayasJob,
+      secondJob,
+      devGlobalJob,
+    ]);
+  });
+
+  it("preserves seniority, employment type and country fields", async () => {
     himalayasMock.mockResolvedValueOnce([himalayasJob]);
+    devGlobalMock.mockResolvedValueOnce([devGlobalJob]);
 
     const jobs = await getJobs();
-    const himalayasResult = jobs.find((job) => job.id === himalayasJob.id);
 
-    expect(himalayasResult).toMatchObject({
+    expect(jobs[0]).toMatchObject({
       seniority: ["Senior"],
       employmentType: "Full Time",
     });
-  });
 
-  it("does not invent filter fields for Remote OK jobs", async () => {
-    remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
-    himalayasMock.mockResolvedValueOnce([]);
-
-    const [job] = await getJobs();
-
-    expect(job).not.toHaveProperty("seniority");
-    expect(job).not.toHaveProperty("employmentType");
-  });
-
-  it("preserves unknown Himalayas filter values", async () => {
-    const job = {
-      ...himalayasJob,
+    expect(jobs[1]).toMatchObject({
+      country: "MY",
       seniority: [],
-      employmentType: null,
-    };
-
-    remoteOkMock.mockResolvedValueOnce([]);
-    himalayasMock.mockResolvedValueOnce([job]);
-
-    await expect(getJobs()).resolves.toEqual([job]);
+      employmentType: "Full-time",
+    });
   });
 
-  it("returns Himalayas jobs when Remote OK fails", async () => {
-    const error = new Error("Remote OK unavailable");
+  it("does not invent filter fields for sources without them", async () => {
+    wwrMock.mockResolvedValueOnce([wwrJob]);
+    remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
 
-    remoteOkMock.mockRejectedValueOnce(error);
-    himalayasMock.mockResolvedValueOnce([himalayasJob]);
+    const jobs = await getJobs();
 
-    await expect(getJobs()).resolves.toEqual([himalayasJob]);
+    for (const job of jobs) {
+      expect(job).not.toHaveProperty("seniority");
+      expect(job).not.toHaveProperty("employmentType");
+    }
+  });
+
+  it("returns other jobs when Himalayas fails", async () => {
+    const error = new Error("Himalayas unavailable");
+
+    himalayasMock.mockRejectedValueOnce(error);
+    devGlobalMock.mockResolvedValueOnce([devGlobalJob]);
+    wwrMock.mockResolvedValueOnce([wwrJob]);
+    remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
+
+    await expect(getJobs()).resolves.toEqual([
+      devGlobalJob,
+      wwrJob,
+      remoteOkJob,
+    ]);
 
     expect(console.error).toHaveBeenCalledWith("Job source failed:", error);
   });
 
-  it("returns Remote OK jobs when Himalayas fails", async () => {
+  it("returns other jobs when Dev Global Jobs fails", async () => {
+    himalayasMock.mockResolvedValueOnce([himalayasJob]);
+    devGlobalMock.mockRejectedValueOnce(
+      new Error("Dev Global Jobs unavailable"),
+    );
+    wwrMock.mockResolvedValueOnce([wwrJob]);
     remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
-    himalayasMock.mockRejectedValueOnce(new Error("Himalayas unavailable"));
+
+    await expect(getJobs()).resolves.toEqual([
+      himalayasJob,
+      wwrJob,
+      remoteOkJob,
+    ]);
+  });
+
+  it("returns other jobs when We Work Remotely fails", async () => {
+    himalayasMock.mockResolvedValueOnce([himalayasJob]);
+    devGlobalMock.mockResolvedValueOnce([devGlobalJob]);
+    wwrMock.mockRejectedValueOnce(new Error("WWR unavailable"));
+    remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
+
+    await expect(getJobs()).resolves.toEqual([
+      himalayasJob,
+      devGlobalJob,
+      remoteOkJob,
+    ]);
+  });
+
+  it("returns other jobs when Remote OK fails", async () => {
+    himalayasMock.mockResolvedValueOnce([himalayasJob]);
+    devGlobalMock.mockResolvedValueOnce([devGlobalJob]);
+    wwrMock.mockResolvedValueOnce([wwrJob]);
+    remoteOkMock.mockRejectedValueOnce(new Error("Remote OK unavailable"));
+
+    await expect(getJobs()).resolves.toEqual([
+      himalayasJob,
+      devGlobalJob,
+      wwrJob,
+    ]);
+  });
+
+  it("returns the remaining source when three sources fail", async () => {
+    himalayasMock.mockRejectedValueOnce(new Error("Himalayas failed"));
+    devGlobalMock.mockRejectedValueOnce(new Error("Dev Global Jobs failed"));
+    wwrMock.mockRejectedValueOnce(new Error("WWR failed"));
+    remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
 
     await expect(getJobs()).resolves.toEqual([remoteOkJob]);
+    expect(console.error).toHaveBeenCalledTimes(3);
   });
 
-  it("throws when both sources fail", async () => {
-    remoteOkMock.mockRejectedValueOnce(new Error("Remote OK failed"));
+  it("throws when all sources fail", async () => {
     himalayasMock.mockRejectedValueOnce(new Error("Himalayas failed"));
+    devGlobalMock.mockRejectedValueOnce(new Error("Dev Global Jobs failed"));
+    wwrMock.mockRejectedValueOnce(new Error("WWR failed"));
+    remoteOkMock.mockRejectedValueOnce(new Error("Remote OK failed"));
 
     await expect(getJobs()).rejects.toThrow("All job sources failed");
+    expect(console.error).toHaveBeenCalledTimes(4);
   });
 
-  it("returns an empty array when both sources succeed with no jobs", async () => {
-    remoteOkMock.mockResolvedValueOnce([]);
-    himalayasMock.mockResolvedValueOnce([]);
+  it("returns an empty array when all sources succeed with no jobs", async () => {
+    await expect(getJobs()).resolves.toEqual([]);
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("does not throw when one source succeeds with no jobs", async () => {
+    himalayasMock.mockRejectedValueOnce(new Error("Himalayas failed"));
+    devGlobalMock.mockRejectedValueOnce(new Error("Dev Global Jobs failed"));
+    wwrMock.mockRejectedValueOnce(new Error("WWR failed"));
 
     await expect(getJobs()).resolves.toEqual([]);
   });
 
-  it("returns jobs when the other source succeeds with an empty array", async () => {
-    remoteOkMock.mockResolvedValueOnce([]);
+  it("does not log errors when all sources succeed", async () => {
     himalayasMock.mockResolvedValueOnce([himalayasJob]);
-
-    await expect(getJobs()).resolves.toEqual([himalayasJob]);
-  });
-
-  it("does not throw when one source fails and the other returns no jobs", async () => {
-    remoteOkMock.mockRejectedValueOnce(new Error("Remote OK failed"));
-    himalayasMock.mockResolvedValueOnce([]);
-
-    await expect(getJobs()).resolves.toEqual([]);
-  });
-
-  it("does not log errors when both sources succeed", async () => {
+    devGlobalMock.mockResolvedValueOnce([devGlobalJob]);
+    wwrMock.mockResolvedValueOnce([wwrJob]);
     remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
-    himalayasMock.mockResolvedValueOnce([himalayasJob]);
 
     await getJobs();
 
