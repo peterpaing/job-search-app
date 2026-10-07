@@ -28,6 +28,8 @@ export async function getHimalayasJobs() {
       companyLogo: job.companyLogo?.trim() || null,
       location: job.locationRestrictions?.join(", ") || null,
       tags: job.categories ?? [],
+      seniority: job.seniority ?? [],
+      employmentType: job.employmentType?.trim() || null,
       url: job.applicationLink,
       postedAt: new Date(job.pubDate * 1000).toISOString(),
     }));

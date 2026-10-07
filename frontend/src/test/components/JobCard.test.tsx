@@ -67,6 +67,15 @@ describe("JobCard", () => {
     expect(screen.queryByText("css")).not.toBeInTheDocument();
   });
 
+  it("renders correctly without tags", () => {
+    render(<JobCard job={{ ...job, tags: [] }} />);
+
+    expect(
+      screen.getByRole("heading", { name: job.title }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("react")).not.toBeInTheDocument();
+  });
+
   it("links to the job details in a new tab", () => {
     render(<JobCard job={job} />);
 
@@ -74,6 +83,7 @@ describe("JobCard", () => {
       name: "View Frontend Engineer at Example (opens in a new tab)",
     });
 
+    expect(link).toHaveTextContent("View job details");
     expect(link).toHaveAttribute("href", job.url);
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
@@ -90,5 +100,59 @@ describe("JobCard", () => {
     render(<JobCard job={job} />);
 
     expect(screen.queryByText(job.description)).not.toBeInTheDocument();
+  });
+
+  it("displays the posted date with a machine-readable timestamp", () => {
+    render(<JobCard job={job} />);
+
+    const time = screen.getByText("Oct 7, 2026");
+
+    expect(time.tagName).toBe("TIME");
+    expect(time).toHaveAttribute("dateTime", "2026-10-07T00:00:00.000Z");
+    expect(time.parentElement).toHaveTextContent("Posted Oct 7, 2026");
+  });
+
+  it("formats a Himalayas ISO timestamp correctly", () => {
+    render(
+      <JobCard
+        job={{
+          ...job,
+          source: "Himalayas",
+          postedAt: "2026-10-08T00:00:00.000Z",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Oct 8, 2026")).toBeInTheDocument();
+    expect(screen.getByText("Source: Himalayas")).toBeInTheDocument();
+  });
+
+  it("formats the posted date consistently in UTC", () => {
+    render(
+      <JobCard
+        job={{
+          ...job,
+          postedAt: "2026-10-08T00:30:00+06:30",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Oct 7, 2026")).toHaveAttribute(
+      "dateTime",
+      "2026-10-07T18:00:00.000Z",
+    );
+  });
+
+  it("shows a fallback for an invalid posted date", () => {
+    render(<JobCard job={{ ...job, postedAt: "invalid-date" }} />);
+
+    expect(screen.getByText("Posted date unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Invalid Date")).not.toBeInTheDocument();
+  });
+
+  it("shows a fallback for an empty posted date", () => {
+    render(<JobCard job={{ ...job, postedAt: "" }} />);
+
+    expect(screen.getByText("Posted date unavailable")).toBeInTheDocument();
   });
 });

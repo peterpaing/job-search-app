@@ -7,6 +7,8 @@ export const himalayasJobSchema = z.object({
   companyLogo: z.string().nullish(),
   locationRestrictions: z.array(z.string()).optional(),
   categories: z.array(z.string()).optional(),
+  seniority: z.array(z.string()).nullish(),
+  employmentType: z.string().nullish(),
   applicationLink: z.string().url(),
   pubDate: z.number(),
 });

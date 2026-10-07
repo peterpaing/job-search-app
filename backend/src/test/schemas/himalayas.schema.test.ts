@@ -11,13 +11,15 @@ const validJob = {
   companyLogo: "https://example.com/logo.png",
   locationRestrictions: ["Singapore"],
   categories: ["React", "Frontend"],
+  seniority: ["Senior"],
+  employmentType: "Full Time",
   applicationLink:
     "https://himalayas.app/companies/example/jobs/frontend-engineer",
   pubDate: 1791417600,
 };
 
 describe("himalayasJobSchema", () => {
-  it("accepts a valid job", () => {
+  it("accepts a valid job including seniority and employment type", () => {
     expect(himalayasJobSchema.parse(validJob)).toEqual(validJob);
   });
 
@@ -48,6 +50,73 @@ describe("himalayasJobSchema", () => {
         ...validJob,
         locationRestrictions: [],
         categories: [],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("preserves multiple seniority levels", () => {
+    const seniority = ["Mid-level", "Senior"];
+
+    const result = himalayasJobSchema.parse({
+      ...validJob,
+      seniority,
+    });
+
+    expect(result.seniority).toEqual(seniority);
+  });
+
+  it("accepts an empty seniority array", () => {
+    expect(
+      himalayasJobSchema.safeParse({
+        ...validJob,
+        seniority: [],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts null seniority and employment type", () => {
+    const result = himalayasJobSchema.parse({
+      ...validJob,
+      seniority: null,
+      employmentType: null,
+    });
+
+    expect(result.seniority).toBeNull();
+    expect(result.employmentType).toBeNull();
+  });
+
+  it("rejects seniority that is not an array", () => {
+    expect(
+      himalayasJobSchema.safeParse({
+        ...validJob,
+        seniority: "Senior",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects non-string seniority entries", () => {
+    expect(
+      himalayasJobSchema.safeParse({
+        ...validJob,
+        seniority: ["Senior", 123],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a non-string employment type", () => {
+    expect(
+      himalayasJobSchema.safeParse({
+        ...validJob,
+        employmentType: 123,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts an empty employment type string", () => {
+    expect(
+      himalayasJobSchema.safeParse({
+        ...validJob,
+        employmentType: "",
       }).success,
     ).toBe(true);
   });

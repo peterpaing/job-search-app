@@ -8,6 +8,8 @@ const validJob = {
   companyLogo: "https://example.com/logo.png",
   locationRestrictions: ["Singapore"],
   categories: ["React", "Frontend"],
+  seniority: ["Senior"],
+  employmentType: "Full Time",
   applicationLink:
     "https://himalayas.app/companies/example/jobs/frontend-engineer",
   pubDate: 1791417600,
@@ -49,7 +51,7 @@ describe("getHimalayasJobs", () => {
     );
   });
 
-  it("maps a job into the frontend response format", async () => {
+  it("maps job fields including seniority and employment type", async () => {
     mockResponse({ jobs: [validJob] });
 
     await expect(getHimalayasJobs()).resolves.toEqual([
@@ -61,6 +63,8 @@ describe("getHimalayasJobs", () => {
         companyLogo: "https://example.com/logo.png",
         location: "Singapore",
         tags: ["React", "Frontend"],
+        seniority: ["Senior"],
+        employmentType: "Full Time",
         url: validJob.applicationLink,
         postedAt: "2026-10-08T00:00:00.000Z",
       },
@@ -182,6 +186,64 @@ describe("getHimalayasJobs", () => {
     },
   );
 
+  it("preserves multiple seniority levels", async () => {
+    mockResponse({
+      jobs: [
+        {
+          ...validJob,
+          seniority: ["Mid-level", "Senior"],
+        },
+      ],
+    });
+
+    const [job] = await getHimalayasJobs();
+
+    expect(job.seniority).toEqual(["Mid-level", "Senior"]);
+  });
+
+  it("preserves an empty seniority array", async () => {
+    mockResponse({
+      jobs: [{ ...validJob, seniority: [] }],
+    });
+
+    const [job] = await getHimalayasJobs();
+
+    expect(job.seniority).toEqual([]);
+  });
+
+  it("converts null seniority to an empty array", async () => {
+    mockResponse({
+      jobs: [{ ...validJob, seniority: null }],
+    });
+
+    const [job] = await getHimalayasJobs();
+
+    expect(job.seniority).toEqual([]);
+  });
+
+  it("trims employment type", async () => {
+    mockResponse({
+      jobs: [{ ...validJob, employmentType: "  Full Time  " }],
+    });
+
+    const [job] = await getHimalayasJobs();
+
+    expect(job.employmentType).toBe("Full Time");
+  });
+
+  it.each(["", "   ", null])(
+    "converts an empty or null employment type to null: %s",
+    async (employmentType) => {
+      mockResponse({
+        jobs: [{ ...validJob, employmentType }],
+      });
+
+      const [job] = await getHimalayasJobs();
+
+      expect(job.employmentType).toBeNull();
+    },
+  );
+
   it("handles missing optional fields", async () => {
     mockResponse({
       jobs: [
@@ -200,6 +262,8 @@ describe("getHimalayasJobs", () => {
     expect(job.companyLogo).toBeNull();
     expect(job.location).toBeNull();
     expect(job.tags).toEqual([]);
+    expect(job.seniority).toEqual([]);
+    expect(job.employmentType).toBeNull();
   });
 
   it("returns an empty array when there are no jobs", async () => {
@@ -232,7 +296,23 @@ describe("getHimalayasJobs", () => {
     });
   });
 
-  it("rejects invalid response data", async () => {
+  it("rejects invalid seniority data", async () => {
+    mockResponse({
+      jobs: [{ ...validJob, seniority: "Senior" }],
+    });
+
+    await expect(getHimalayasJobs()).rejects.toThrow();
+  });
+
+  it("rejects invalid employment type data", async () => {
+    mockResponse({
+      jobs: [{ ...validJob, employmentType: 123 }],
+    });
+
+    await expect(getHimalayasJobs()).rejects.toThrow();
+  });
+
+  it("rejects invalid publication timestamps", async () => {
     mockResponse({
       jobs: [{ ...validJob, pubDate: "invalid" }],
     });

@@ -15,6 +15,9 @@ export type Job = {
 };
 
 export default function JobCard({ job }: { job: Job }) {
+  const postedDate = new Date(job.postedAt);
+  const hasValidDate = !Number.isNaN(postedDate.getTime());
+
   return (
     <article className="border-border bg-background flex flex-col rounded-2xl border p-5">
       <div className="flex items-start justify-between gap-3">
@@ -58,6 +61,24 @@ export default function JobCard({ job }: { job: Job }) {
       </div>
 
       <h3 className="text-primary mt-4 text-lg font-semibold">{job.title}</h3>
+
+      <p className="text-muted mt-2 text-xs">
+        {hasValidDate ? (
+          <>
+            Posted{" "}
+            <time dateTime={postedDate.toISOString()}>
+              {postedDate.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+                timeZone: "UTC",
+              })}
+            </time>
+          </>
+        ) : (
+          "Posted date unavailable"
+        )}
+      </p>
 
       <div className="mt-3 flex flex-wrap gap-2">
         {job.tags.slice(0, 4).map((tag, index) => (

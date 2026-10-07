@@ -34,6 +34,8 @@ const himalayasJob = {
   companyLogo: null,
   location: "Malaysia",
   tags: ["Node.js"],
+  seniority: ["Senior"],
+  employmentType: "Full Time",
   url: "https://himalayas.app/companies/example/jobs/backend-developer",
   postedAt: "2026-10-08T00:00:00.000Z",
 };
@@ -57,6 +59,42 @@ describe("getJobs", () => {
 
     expect(remoteOkMock).toHaveBeenCalledTimes(1);
     expect(himalayasMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves Himalayas seniority and employment type", async () => {
+    remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
+    himalayasMock.mockResolvedValueOnce([himalayasJob]);
+
+    const jobs = await getJobs();
+    const himalayasResult = jobs.find((job) => job.id === himalayasJob.id);
+
+    expect(himalayasResult).toMatchObject({
+      seniority: ["Senior"],
+      employmentType: "Full Time",
+    });
+  });
+
+  it("does not invent filter fields for Remote OK jobs", async () => {
+    remoteOkMock.mockResolvedValueOnce([remoteOkJob]);
+    himalayasMock.mockResolvedValueOnce([]);
+
+    const [job] = await getJobs();
+
+    expect(job).not.toHaveProperty("seniority");
+    expect(job).not.toHaveProperty("employmentType");
+  });
+
+  it("preserves unknown Himalayas filter values", async () => {
+    const job = {
+      ...himalayasJob,
+      seniority: [],
+      employmentType: null,
+    };
+
+    remoteOkMock.mockResolvedValueOnce([]);
+    himalayasMock.mockResolvedValueOnce([job]);
+
+    await expect(getJobs()).resolves.toEqual([job]);
   });
 
   it("returns Himalayas jobs when Remote OK fails", async () => {
