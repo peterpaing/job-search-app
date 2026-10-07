@@ -1,6 +1,7 @@
 import Intro from "./component/Intro";
-import JobCard, { type Job } from "./component/JobCard";
+import type { Job } from "./component/JobCard";
 import JobsLayout from "./component/JobsLayout";
+import JobsList from "./component/JobsList";
 
 type JobsResponse = {
   jobs: Job[];
@@ -23,15 +24,7 @@ export default async function Home() {
       <Intro />
 
       <JobsLayout>
-        {data.jobs.length === 0 ? (
-          <p className="text-muted">No jobs found.</p>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {data.jobs.map((job) => (
-              <JobCard key={job.id} job={job} />
-            ))}
-          </div>
-        )}
+        <JobsList jobs={data.jobs} />
       </JobsLayout>
     </>
   );

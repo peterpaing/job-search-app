@@ -19,7 +19,7 @@ export default function JobCard({ job }: { job: Job }) {
   const hasValidDate = !Number.isNaN(postedDate.getTime());
 
   return (
-    <article className="border-border bg-background flex flex-col rounded-2xl border p-5">
+    <article className="border-border bg-background flex min-h-[250px] flex-col rounded-2xl border p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           {job.companyLogo ? (

@@ -1,3 +1,7 @@
+"use client";
+
+import { useState, type FormEvent } from "react";
+
 const sources = [
   "Remote OK",
   "We Work Remotely",
@@ -5,12 +9,76 @@ const sources = [
   "Dev Global Jobs",
 ];
 
-const selectClass =
+const inputClass =
   "w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-primary focus:outline-none focus:ring-2 focus:ring-primary/20";
 
-export default function JobFilters() {
+export type JobFilterValues = {
+  sources: string[];
+  company: string;
+  postedWithin: string;
+};
+
+type JobFiltersProps = {
+  onApply?: (filters: JobFilterValues) => void;
+  onClear?: () => void;
+};
+
+function emptyFilters(): JobFilterValues {
+  return {
+    sources: [],
+    company: "",
+    postedWithin: "",
+  };
+}
+
+export default function JobFilters({ onApply, onClear }: JobFiltersProps) {
+  const [filters, setFilters] = useState<JobFilterValues>(emptyFilters);
+  const [isApplied, setIsApplied] = useState(false);
+
+  function toggleSource(source: string) {
+    setFilters((previous) => ({
+      ...previous,
+      sources: previous.sources.includes(source)
+        ? previous.sources.filter((value) => value !== source)
+        : [...previous.sources, source],
+    }));
+
+    setIsApplied(false);
+  }
+
+  function updateField<K extends keyof JobFilterValues>(
+    field: K,
+    value: JobFilterValues[K],
+  ) {
+    setFilters((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+
+    setIsApplied(false);
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (isApplied) {
+      setFilters(emptyFilters());
+      setIsApplied(false);
+      onClear?.();
+      return;
+    }
+
+    onApply?.({
+      ...filters,
+      sources: [...filters.sources],
+      company: filters.company.trim(),
+    });
+
+    setIsApplied(true);
+  }
+
   return (
-    <div className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-6">
       <h2 className="text-primary text-lg font-semibold">Filters</h2>
 
       <fieldset className="space-y-3">
@@ -27,6 +95,8 @@ export default function JobFilters() {
               type="checkbox"
               name="source"
               value={source}
+              checked={filters.sources.includes(source)}
+              onChange={() => toggleSource(source)}
               className="accent-primary h-4 w-4"
             />
             {source}
@@ -35,51 +105,27 @@ export default function JobFilters() {
       </fieldset>
 
       <label className="block space-y-2">
-        <span className="text-primary text-sm font-medium">
-          Employment type
-        </span>
-
-        <select name="employmentType" className={selectClass}>
-          <option value="">Any type</option>
-          <option value="full-time">Full-time</option>
-          <option value="part-time">Part-time</option>
-          <option value="contract">Contract</option>
-          <option value="temporary">Temporary</option>
-          <option value="internship">Internship</option>
-        </select>
-      </label>
-
-      <label className="block space-y-2">
-        <span className="text-primary text-sm font-medium">
-          Experience level
-        </span>
-
-        <select name="seniority" className={selectClass}>
-          <option value="">Any level</option>
-          <option value="entry-level">Entry-level</option>
-          <option value="mid-level">Mid-level</option>
-          <option value="senior">Senior</option>
-          <option value="manager">Manager</option>
-          <option value="director">Director</option>
-          <option value="executive">Executive</option>
-        </select>
-      </label>
-
-      <label className="block space-y-2">
-        <span className="text-primary text-sm font-medium">Country</span>
+        <span className="text-primary text-sm font-medium">Company</span>
 
         <input
           type="text"
-          name="country"
-          placeholder="Enter country"
-          className={selectClass}
+          name="company"
+          placeholder="Enter company name"
+          value={filters.company ?? ""}
+          onChange={(event) => updateField("company", event.target.value)}
+          className={inputClass}
         />
       </label>
 
       <label className="block space-y-2">
         <span className="text-primary text-sm font-medium">Date posted</span>
 
-        <select name="postedWithin" className={selectClass}>
+        <select
+          name="postedWithin"
+          value={filters.postedWithin}
+          onChange={(event) => updateField("postedWithin", event.target.value)}
+          className={inputClass}
+        >
           <option value="">Any time</option>
           <option value="1">Past 24 hours</option>
           <option value="7">Past 7 days</option>
@@ -87,21 +133,12 @@ export default function JobFilters() {
         </select>
       </label>
 
-      <label className="text-muted flex cursor-pointer items-center gap-3 text-sm">
-        <input
-          type="checkbox"
-          name="salaryDisclosed"
-          className="accent-primary h-4 w-4"
-        />
-        Salary disclosed only
-      </label>
-
       <button
-        type="button"
+        type="submit"
         className="bg-primary text-background hover:bg-muted focus-visible:outline-primary w-full rounded-full px-4 py-3 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2"
       >
-        Apply filters
+        {isApplied ? "Clear filters" : "Apply filters"}
       </button>
-    </div>
+    </form>
   );
 }
