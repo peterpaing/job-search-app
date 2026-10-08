@@ -1,7 +1,20 @@
-import { asc, desc, eq, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  lte,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { jobs, type DatabaseJob } from "../../db/schema.js";
+import type { JobsQuery } from "../../schemas/jobs-query.schema.js";
 import { getStoredJobs } from "../../services/database-jobs.service.js";
 
 const dbMocks = vi.hoisted(() => ({
@@ -33,6 +46,7 @@ type QueryRow = Pick<
 >;
 
 const dialect = new PgDialect();
+const NOW = "2026-10-09T12:00:00.000Z";
 
 function normalizeSql(expression: SQL) {
   const query = dialect.sqlToQuery(expression);
@@ -40,6 +54,29 @@ function normalizeSql(expression: SQL) {
   return {
     sql: query.sql.replace(/\s+/g, " ").trim(),
     params: query.params,
+  };
+}
+
+function actualFilter() {
+  expect(dbMocks.where).toHaveBeenCalledTimes(1);
+
+  const expression: SQL = dbMocks.where.mock.calls[0][0];
+
+  return normalizeSql(expression);
+}
+
+function expectFilter(expected: SQL) {
+  expect(actualFilter()).toEqual(normalizeSql(expected));
+}
+
+function createFilters(overrides: Partial<JobsQuery> = {}): JobsQuery {
+  return {
+    q: "",
+    location: "",
+    company: "",
+    sources: [],
+    postedWithin: "",
+    ...overrides,
   };
 }
 
@@ -62,6 +99,9 @@ function createRow(overrides: Partial<QueryRow> = {}): QueryRow {
 
 describe("getStoredJobs", () => {
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(NOW));
+
     dbMocks.select.mockReset();
     dbMocks.from.mockReset();
     dbMocks.where.mockReset();
@@ -80,6 +120,10 @@ describe("getStoredJobs", () => {
     });
 
     dbMocks.orderBy.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("selects public job fields from the jobs table", async () => {
@@ -103,20 +147,207 @@ describe("getStoredJobs", () => {
     expect(dbMocks.from).toHaveBeenCalledWith(jobs);
   });
 
-  it("configures the query to include only active jobs", async () => {
+  it("includes only active jobs when no filters are supplied", async () => {
     await getStoredJobs();
 
-    expect(dbMocks.where).toHaveBeenCalledTimes(1);
+    expectFilter(eq(jobs.isActive, true));
+  });
 
-    const actualFilter: SQL = dbMocks.where.mock.calls[0][0];
+  it("does not add conditions for empty filters", async () => {
+    await getStoredJobs(createFilters());
 
-    expect(normalizeSql(actualFilter)).toEqual(
-      normalizeSql(eq(jobs.isActive, true)),
+    expectFilter(eq(jobs.isActive, true));
+  });
+
+  it("filters by a single selected source", async () => {
+    await getStoredJobs(
+      createFilters({
+        sources: ["Himalayas"],
+      }),
+    );
+
+    expectFilter(
+      and(eq(jobs.isActive, true), inArray(jobs.source, ["Himalayas"]))!,
     );
   });
 
-  it("configures source priority, newest first within each source, and an ID tie-breaker", async () => {
-    await getStoredJobs();
+  it("matches any of the selected sources using IN", async () => {
+    await getStoredJobs(
+      createFilters({
+        sources: ["Himalayas", "Remote OK"],
+      }),
+    );
+
+    expectFilter(
+      and(
+        eq(jobs.isActive, true),
+        inArray(jobs.source, ["Himalayas", "Remote OK"]),
+      )!,
+    );
+  });
+
+  it("uses a case-insensitive partial company match", async () => {
+    await getStoredJobs(
+      createFilters({
+        company: "Example",
+      }),
+    );
+
+    expectFilter(
+      and(eq(jobs.isActive, true), ilike(jobs.company, "%Example%"))!,
+    );
+  });
+
+  it("searches the title OR individual tags for a keyword", async () => {
+    await getStoredJobs(
+      createFilters({
+        q: "React",
+      }),
+    );
+
+    const keywordCondition = or(
+      ilike(jobs.title, "%React%"),
+      sql`
+        EXISTS (
+          SELECT 1
+          FROM unnest(${jobs.tags}) AS job_tag(value)
+          WHERE job_tag.value ILIKE ${"%React%"}
+        )
+      `,
+    );
+
+    expectFilter(and(eq(jobs.isActive, true), keywordCondition)!);
+  });
+
+  it("searches location OR country", async () => {
+    await getStoredJobs(
+      createFilters({
+        location: "Singapore",
+      }),
+    );
+
+    expectFilter(
+      and(
+        eq(jobs.isActive, true),
+        or(
+          ilike(jobs.location, "%Singapore%"),
+          ilike(jobs.country, "%Singapore%"),
+        ),
+      )!,
+    );
+  });
+
+  it.each([
+    ["1", "2026-10-08T12:00:00.000Z"],
+    ["7", "2026-10-02T12:00:00.000Z"],
+    ["30", "2026-09-09T12:00:00.000Z"],
+  ] as const)(
+    "uses an inclusive cutoff and excludes future dates for postedWithin=%s",
+    async (postedWithin, cutoff) => {
+      await getStoredJobs(
+        createFilters({
+          postedWithin,
+        }),
+      );
+
+      expectFilter(
+        and(
+          eq(jobs.isActive, true),
+          gte(jobs.postedAt, cutoff),
+          lte(jobs.postedAt, NOW),
+        )!,
+      );
+    },
+  );
+
+  it("combines different filter groups with AND", async () => {
+    await getStoredJobs(
+      createFilters({
+        sources: ["Himalayas", "Remote OK"],
+        company: "Example",
+        q: "React",
+        location: "Singapore",
+        postedWithin: "7",
+      }),
+    );
+
+    const keywordCondition = or(
+      ilike(jobs.title, "%React%"),
+      sql`
+        EXISTS (
+          SELECT 1
+          FROM unnest(${jobs.tags}) AS job_tag(value)
+          WHERE job_tag.value ILIKE ${"%React%"}
+        )
+      `,
+    );
+
+    expectFilter(
+      and(
+        eq(jobs.isActive, true),
+        inArray(jobs.source, ["Himalayas", "Remote OK"]),
+        ilike(jobs.company, "%Example%"),
+        keywordCondition,
+        or(
+          ilike(jobs.location, "%Singapore%"),
+          ilike(jobs.country, "%Singapore%"),
+        ),
+        gte(jobs.postedAt, "2026-10-02T12:00:00.000Z"),
+        lte(jobs.postedAt, NOW),
+      )!,
+    );
+  });
+
+  it.each([
+    ["company", 1],
+    ["q", 2],
+    ["location", 2],
+  ] as const)(
+    "escapes wildcard characters and backslashes in %s",
+    async (field, occurrences) => {
+      const value = String.raw`Example_100%\Team`;
+      const expectedPattern = String.raw`%Example\_100\%\\Team%`;
+
+      await getStoredJobs(
+        createFilters({
+          [field]: value,
+        }),
+      );
+
+      const query = actualFilter();
+
+      expect(query.params).toEqual([
+        true,
+        ...Array.from({ length: occurrences }, () => expectedPattern),
+      ]);
+
+      // User text belongs in parameters, not the SQL statement.
+      expect(query.sql).not.toContain(value);
+    },
+  );
+
+  it("parameterizes SQL-looking input rather than inserting it into SQL", async () => {
+    const keyword = "' OR 1=1 --";
+
+    await getStoredJobs(
+      createFilters({
+        q: keyword,
+      }),
+    );
+
+    const query = actualFilter();
+
+    expect(query.params).toEqual([true, `%${keyword}%`, `%${keyword}%`]);
+
+    expect(query.sql).not.toContain(keyword);
+  });
+
+  it("keeps source priority, newest-first ordering and an ID tie-breaker when filtered", async () => {
+    await getStoredJobs(
+      createFilters({
+        company: "Example",
+      }),
+    );
 
     const sourcePriority = sql<number>`
       CASE ${jobs.source}
@@ -157,9 +388,17 @@ describe("getStoredJobs", () => {
   });
 
   it("returns an empty array when the database returns no jobs", async () => {
-    dbMocks.orderBy.mockResolvedValueOnce([]);
-
     await expect(getStoredJobs()).resolves.toEqual([]);
+  });
+
+  it("returns an empty array when a filtered query has no results", async () => {
+    await expect(
+      getStoredJobs(
+        createFilters({
+          company: "No matching company",
+        }),
+      ),
+    ).resolves.toEqual([]);
   });
 
   it("converts a null description to an empty string", async () => {
@@ -265,7 +504,7 @@ describe("getStoredJobs", () => {
     await expect(getStoredJobs()).rejects.toBe(error);
   });
 
-  it("does not mutate the database rows", async () => {
+  it("does not mutate the database rows or supplied filters", async () => {
     const rows = [
       createRow({
         description: null,
@@ -273,12 +512,20 @@ describe("getStoredJobs", () => {
       }),
     ];
 
-    const original = structuredClone(rows);
+    const filters = createFilters({
+      sources: ["Himalayas"],
+      company: "Example",
+      postedWithin: "7",
+    });
+
+    const originalRows = structuredClone(rows);
+    const originalFilters = structuredClone(filters);
 
     dbMocks.orderBy.mockResolvedValueOnce(rows);
 
-    await getStoredJobs();
+    await getStoredJobs(filters);
 
-    expect(rows).toEqual(original);
+    expect(rows).toEqual(originalRows);
+    expect(filters).toEqual(originalFilters);
   });
 });

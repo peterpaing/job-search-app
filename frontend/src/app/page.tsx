@@ -43,7 +43,9 @@ export default async function Home({ searchParams }: HomeProps) {
   }
 
   const queryString = query.toString();
-  const apiUrl = new URL("http://localhost:5000/api/jobs");
+  const apiUrl = new URL(
+    process.env.JOBS_API_URL ?? "http://localhost:5000/api/jobs",
+  );
   apiUrl.search = queryString;
 
   const response = await fetch(apiUrl, {
