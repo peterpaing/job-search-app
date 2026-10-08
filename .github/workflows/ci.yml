@@ -53,6 +53,12 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: npm run test:e2e
+
   backend:
     name: Backend checks
     runs-on: ubuntu-latest
@@ -92,9 +98,3 @@ jobs:
 
       - name: Build backend
         run: npm run build
-
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Run browser tests
-        run: npm run test:e2e
