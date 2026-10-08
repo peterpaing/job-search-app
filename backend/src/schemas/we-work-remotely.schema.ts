@@ -6,11 +6,9 @@ export const weWorkRemotelyJobSchema = z.object({
   guid: z.string().optional(),
   region: z.string().optional(),
   categories: z.array(z.string()).optional(),
-  pubDate: z
-    .string()
-    .refine((value) => !Number.isNaN(Date.parse(value)), {
-      message: "Invalid publication date",
-    }),
+  pubDate: z.string().refine((value) => !Number.isNaN(Date.parse(value)), {
+    message: "Invalid publication date",
+  }),
 });
 
 export const weWorkRemotelyResponseSchema = z.object({

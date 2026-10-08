@@ -14,7 +14,13 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "jobs:import": "tsx src/scripts/import-jobs.ts",
+    "db:migrate:test": "drizzle-kit migrate --config drizzle.test.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.mts"
   },
   "keywords": [],
   "author": "",
@@ -23,6 +29,7 @@
     "@neondatabase/serverless": "^1.2.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.6",
+    "drizzle-orm": "^0.45.4",
     "express": "^5.2.1",
     "rss-parser": "^3.13.0",
     "zod": "^4.6.5"
@@ -33,6 +40,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^24.19.1",
     "@types/supertest": "^7.2.1",
+    "drizzle-kit": "^0.31.11",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.13.0",
