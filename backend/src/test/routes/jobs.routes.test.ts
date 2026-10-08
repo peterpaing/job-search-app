@@ -1,13 +1,13 @@
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../../app.js";
-import { getJobs } from "../../services/jobs.service.js";
+import { getStoredJobs } from "../../services/database-jobs.service.js";
 
-vi.mock("../../services/jobs.service.js", () => ({
-  getJobs: vi.fn(),
+vi.mock("../../services/database-jobs.service.js", () => ({
+  getStoredJobs: vi.fn(),
 }));
 
-const getJobsMock = vi.mocked(getJobs);
+const getStoredJobsMock = vi.mocked(getStoredJobs);
 
 const job = {
   id: "remote-ok-123",
@@ -15,23 +15,25 @@ const job = {
   title: "Frontend Engineer",
   company: "Example",
   companyLogo: null,
+  description: "",
   location: "Singapore",
+  country: null,
   tags: ["react", "typescript"],
   url: "https://remoteok.com/remote-jobs/example-123",
-  postedAt: "2026-10-07T00:00:00Z",
+  postedAt: "2026-10-07T00:00:00.000Z",
 };
 
 describe("GET /api/jobs", () => {
   beforeEach(() => {
-    getJobsMock.mockReset();
+    getStoredJobsMock.mockReset();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("returns jobs and their total", async () => {
-    getJobsMock.mockResolvedValueOnce([job]);
+  it("returns stored jobs and their total", async () => {
+    getStoredJobsMock.mockResolvedValueOnce([job]);
 
     const response = await request(app).get("/api/jobs");
 
@@ -41,11 +43,11 @@ describe("GET /api/jobs", () => {
       jobs: [job],
       total: 1,
     });
-    expect(getJobsMock).toHaveBeenCalledTimes(1);
+    expect(getStoredJobsMock).toHaveBeenCalledTimes(1);
   });
 
-  it("returns an empty array when no jobs are found", async () => {
-    getJobsMock.mockResolvedValueOnce([]);
+  it("returns an empty array when no stored jobs are found", async () => {
+    getStoredJobsMock.mockResolvedValueOnce([]);
 
     const response = await request(app).get("/api/jobs");
 
@@ -63,7 +65,7 @@ describe("GET /api/jobs", () => {
       title: "Backend Developer",
     };
 
-    getJobsMock.mockResolvedValueOnce([job, secondJob]);
+    getStoredJobsMock.mockResolvedValueOnce([job, secondJob]);
 
     const response = await request(app).get("/api/jobs");
 
@@ -72,23 +74,45 @@ describe("GET /api/jobs", () => {
     expect(response.body.total).toBe(2);
   });
 
-  it("returns 502 when the jobs service fails", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    getJobsMock.mockRejectedValueOnce(new Error("Remote OK unavailable"));
+  it("preserves the order returned by the database service", async () => {
+    const himalayasJob = {
+      ...job,
+      id: "himalayas-123",
+      source: "Himalayas",
+      title: "Software Engineer",
+    };
+
+    getStoredJobsMock.mockResolvedValueOnce([himalayasJob, job]);
 
     const response = await request(app).get("/api/jobs");
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(200);
+    expect(response.body.jobs).toEqual([himalayasJob, job]);
+  });
+
+  it("returns 500 when the database service fails", async () => {
+    const error = new Error("Database unavailable");
+
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    getStoredJobsMock.mockRejectedValueOnce(error);
+
+    const response = await request(app).get("/api/jobs");
+
+    expect(response.status).toBe(500);
     expect(response.body).toEqual({
       message: "Unable to fetch jobs. Please try again later.",
     });
     expect(response.body).not.toHaveProperty("jobs");
+    expect(console.error).toHaveBeenCalledWith(
+      "Failed to read stored jobs:",
+      error,
+    );
   });
 
   it("returns 404 for an unknown route", async () => {
     const response = await request(app).get("/api/unknown");
 
     expect(response.status).toBe(404);
-    expect(getJobsMock).not.toHaveBeenCalled();
+    expect(getStoredJobsMock).not.toHaveBeenCalled();
   });
 });
