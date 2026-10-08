@@ -163,9 +163,7 @@ describe("getStoredJobs", () => {
   });
 
   it("converts a null description to an empty string", async () => {
-    dbMocks.orderBy.mockResolvedValueOnce([
-      createRow({ description: null }),
-    ]);
+    dbMocks.orderBy.mockResolvedValueOnce([createRow({ description: null })]);
 
     const result = await getStoredJobs();
 
@@ -181,9 +179,7 @@ describe("getStoredJobs", () => {
 
     const result = await getStoredJobs();
 
-    expect(result[0].description).toBe(
-      "Build accessible applications.",
-    );
+    expect(result[0].description).toBe("Build accessible applications.");
   });
 
   it("preserves null optional fields and empty tags", async () => {
@@ -231,9 +227,7 @@ describe("getStoredJobs", () => {
 
     const result = await getStoredJobs();
 
-    expect(result[0].postedAt).toBe(
-      "2026-10-08T00:00:00.000Z",
-    );
+    expect(result[0].postedAt).toBe("2026-10-08T00:00:00.000Z");
   });
 
   it("preserves the row order supplied by the database", async () => {
@@ -260,9 +254,7 @@ describe("getStoredJobs", () => {
 
     const result = await getStoredJobs();
 
-    expect(result.map((job) => job.id)).toEqual(
-      rows.map((job) => job.id),
-    );
+    expect(result.map((job) => job.id)).toEqual(rows.map((job) => job.id));
   });
 
   it("propagates database errors", async () => {
