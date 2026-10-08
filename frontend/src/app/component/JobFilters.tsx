@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { Suspense, useState, useTransition, type FormEvent } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 const sources = [
   "Remote OK",
@@ -23,6 +24,10 @@ type JobFiltersProps = {
   onClear?: () => void;
 };
 
+type FilterFormProps = JobFiltersProps & {
+  initialQuery: string;
+};
+
 function emptyFilters(): JobFilterValues {
   return {
     sources: [],
@@ -31,9 +36,41 @@ function emptyFilters(): JobFilterValues {
   };
 }
 
-export default function JobFilters({ onApply, onClear }: JobFiltersProps) {
-  const [filters, setFilters] = useState<JobFilterValues>(emptyFilters);
-  const [isApplied, setIsApplied] = useState(false);
+function readFilters(query: string): JobFilterValues {
+  const params = new URLSearchParams(query);
+  const postedWithin = params.get("postedWithin") ?? "";
+
+  return {
+    sources: [
+      ...new Set(
+        params.getAll("source").filter((source) => sources.includes(source)),
+      ),
+    ],
+    company: params.get("company")?.trim() ?? "",
+    postedWithin: ["1", "7", "30"].includes(postedWithin) ? postedWithin : "",
+  };
+}
+
+function hasFilters(filters: JobFilterValues) {
+  return (
+    filters.sources.length > 0 ||
+    filters.company !== "" ||
+    filters.postedWithin !== ""
+  );
+}
+
+function JobFiltersForm({ initialQuery, onApply, onClear }: FilterFormProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [isPending, startTransition] = useTransition();
+
+  const [filters, setFilters] = useState<JobFilterValues>(() =>
+    readFilters(initialQuery),
+  );
+
+  const [isApplied, setIsApplied] = useState(() =>
+    hasFilters(readFilters(initialQuery)),
+  );
 
   function toggleSource(source: string) {
     setFilters((previous) => ({
@@ -58,30 +95,67 @@ export default function JobFilters({ onApply, onClear }: JobFiltersProps) {
     setIsApplied(false);
   }
 
+  function navigate(params: URLSearchParams) {
+    const query = params.toString();
+    const url = query ? `${pathname}?${query}` : pathname;
+
+    startTransition(() => {
+      router.push(url, { scroll: false });
+    });
+  }
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (isPending) {
+      return;
+    }
+
+    const params = new URLSearchParams(initialQuery);
+
+    // Replace only filter parameters and reset URL pagination.
+    params.delete("source");
+    params.delete("company");
+    params.delete("postedWithin");
+    params.delete("page");
 
     if (isApplied) {
       setFilters(emptyFilters());
       setIsApplied(false);
       onClear?.();
+      navigate(params);
       return;
     }
 
-    onApply?.({
-      ...filters,
+    const appliedFilters: JobFilterValues = {
       sources: [...filters.sources],
       company: filters.company.trim(),
-    });
+      postedWithin: filters.postedWithin,
+    };
 
-    setIsApplied(true);
+    for (const source of appliedFilters.sources) {
+      params.append("source", source);
+    }
+
+    if (appliedFilters.company) {
+      params.set("company", appliedFilters.company);
+    }
+
+    if (appliedFilters.postedWithin) {
+      params.set("postedWithin", appliedFilters.postedWithin);
+    }
+
+    setFilters(appliedFilters);
+    setIsApplied(hasFilters(appliedFilters));
+    onApply?.(appliedFilters);
+    navigate(params);
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} aria-busy={isPending} className="space-y-6">
       <h2 className="text-primary text-lg font-semibold">Filters</h2>
 
-      <fieldset className="space-y-3">
+      <fieldset disabled={isPending} className="space-y-3">
         <legend className="text-primary mb-3 text-sm font-medium">
           Job source
         </legend>
@@ -111,7 +185,8 @@ export default function JobFilters({ onApply, onClear }: JobFiltersProps) {
           type="text"
           name="company"
           placeholder="Enter company name"
-          value={filters.company ?? ""}
+          value={filters.company}
+          disabled={isPending}
           onChange={(event) => updateField("company", event.target.value)}
           className={inputClass}
         />
@@ -123,6 +198,7 @@ export default function JobFilters({ onApply, onClear }: JobFiltersProps) {
         <select
           name="postedWithin"
           value={filters.postedWithin}
+          disabled={isPending}
           onChange={(event) => updateField("postedWithin", event.target.value)}
           className={inputClass}
         >
@@ -135,10 +211,32 @@ export default function JobFilters({ onApply, onClear }: JobFiltersProps) {
 
       <button
         type="submit"
-        className="bg-primary text-background hover:bg-muted focus-visible:outline-primary w-full rounded-full px-4 py-3 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2"
+        disabled={isPending}
+        className="bg-primary text-background hover:bg-muted focus-visible:outline-primary w-full rounded-full px-4 py-3 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-60"
       >
-        {isApplied ? "Clear filters" : "Apply filters"}
+        {isPending
+          ? "Updating..."
+          : isApplied
+            ? "Clear filters"
+            : "Apply filters"}
       </button>
     </form>
+  );
+}
+
+function JobFiltersFromUrl(props: JobFiltersProps) {
+  const searchParams = useSearchParams();
+  const query = searchParams.toString();
+
+  return <JobFiltersForm key={query} initialQuery={query} {...props} />;
+}
+
+export default function JobFilters(props: JobFiltersProps) {
+  return (
+    <Suspense
+      fallback={<p className="text-muted text-sm">Loading filters...</p>}
+    >
+      <JobFiltersFromUrl {...props} />
+    </Suspense>
   );
 }
