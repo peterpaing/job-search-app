@@ -1,9 +1,24 @@
 import type { Request, Response } from "express";
+import { jobsQuerySchema } from "../schemas/jobs-query.schema.js";
 import { getStoredJobs } from "../services/database-jobs.service.js";
 
-export async function jobsRouteController(_req: Request, res: Response) {
+export async function jobsRouteController(req: Request, res: Response) {
+  const result = jobsQuerySchema.safeParse(req.query);
+
+  if (!result.success) {
+    res.status(400).json({
+      message: "Invalid job search parameters.",
+      errors: result.error.issues.map((issue) => ({
+        field: issue.path.join("."),
+        message: issue.message,
+      })),
+    });
+
+    return;
+  }
+
   try {
-    const jobs = await getStoredJobs();
+    const jobs = await getStoredJobs(result.data);
 
     res.json({
       jobs,
