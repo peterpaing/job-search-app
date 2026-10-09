@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useTransition } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   HiChevronLeft,
   HiChevronRight,
@@ -8,22 +9,25 @@ import {
 } from "react-icons/hi2";
 import JobCard, { type Job } from "./JobCard";
 
-const JOBS_PER_PAGE = 18;
 const MAX_PAGE_BUTTONS = 4;
 
-export default function JobsList({ jobs }: { jobs: Job[] }) {
-  const [page, setPage] = useState(1);
-  const jobsStartRef = useRef<HTMLDivElement>(null);
+type JobsListProps = {
+  jobs: Job[];
+  page: number;
+  totalPages: number;
+};
 
-  const totalPages = Math.ceil(jobs.length / JOBS_PER_PAGE);
-  const currentPage = Math.min(page, Math.max(totalPages, 1));
-  const startIndex = (currentPage - 1) * JOBS_PER_PAGE;
-  const visibleJobs = jobs.slice(startIndex, startIndex + JOBS_PER_PAGE);
+export default function JobsList({ jobs, page, totalPages }: JobsListProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [isPending, startTransition] = useTransition();
+  const jobsStartRef = useRef<HTMLDivElement>(null);
 
   const pageButtonCount = Math.min(totalPages, MAX_PAGE_BUTTONS);
   const firstVisiblePage = Math.max(
     1,
-    Math.min(currentPage - 2, totalPages - pageButtonCount + 1),
+    Math.min(page - 2, totalPages - pageButtonCount + 1),
   );
 
   const visiblePages = Array.from(
@@ -32,7 +36,29 @@ export default function JobsList({ jobs }: { jobs: Job[] }) {
   );
 
   function changePage(nextPage: number) {
-    setPage(nextPage);
+    if (
+      isPending ||
+      nextPage === page ||
+      nextPage < 1 ||
+      nextPage > totalPages
+    ) {
+      return;
+    }
+
+    const params = new URLSearchParams(searchParams.toString());
+
+    if (nextPage === 1) {
+      params.delete("page");
+    } else {
+      params.set("page", String(nextPage));
+    }
+
+    const query = params.toString();
+    const destination = query ? `${pathname}?${query}` : pathname;
+
+    startTransition(() => {
+      router.push(destination, { scroll: false });
+    });
 
     jobsStartRef.current?.scrollIntoView({
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -65,9 +91,9 @@ export default function JobsList({ jobs }: { jobs: Job[] }) {
   }
 
   return (
-    <div ref={jobsStartRef} className="scroll-mt-24">
+    <div ref={jobsStartRef} aria-busy={isPending} className="scroll-mt-24">
       <div className="grid content-start gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {visibleJobs.map((job) => (
+        {jobs.map((job) => (
           <JobCard key={job.id} job={job} />
         ))}
       </div>
@@ -80,8 +106,8 @@ export default function JobsList({ jobs }: { jobs: Job[] }) {
           <button
             type="button"
             aria-label="Previous page"
-            disabled={currentPage === 1}
-            onClick={() => changePage(currentPage - 1)}
+            disabled={page === 1 || isPending}
+            onClick={() => changePage(page - 1)}
             className="text-primary hover:bg-surface focus-visible:outline-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-30"
           >
             <HiChevronLeft className="h-5 w-5" aria-hidden="true" />
@@ -89,7 +115,7 @@ export default function JobsList({ jobs }: { jobs: Job[] }) {
 
           <div className="flex gap-2 p-1">
             {visiblePages.map((pageNumber) => {
-              const isCurrent = pageNumber === currentPage;
+              const isCurrent = pageNumber === page;
 
               return (
                 <button
@@ -97,8 +123,9 @@ export default function JobsList({ jobs }: { jobs: Job[] }) {
                   type="button"
                   aria-label={`Page ${pageNumber}`}
                   aria-current={isCurrent ? "page" : undefined}
+                  disabled={isPending}
                   onClick={() => changePage(pageNumber)}
-                  className={`focus-visible:outline-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                  className={`focus-visible:outline-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait ${
                     isCurrent
                       ? "bg-primary text-background"
                       : "text-muted hover:bg-surface hover:text-primary"
@@ -113,8 +140,8 @@ export default function JobsList({ jobs }: { jobs: Job[] }) {
           <button
             type="button"
             aria-label="Next page"
-            disabled={currentPage === totalPages}
-            onClick={() => changePage(currentPage + 1)}
+            disabled={page === totalPages || isPending}
+            onClick={() => changePage(page + 1)}
             className="text-primary hover:bg-surface focus-visible:outline-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-30"
           >
             <HiChevronRight className="h-5 w-5" aria-hidden="true" />

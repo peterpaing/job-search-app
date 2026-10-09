@@ -1,13 +1,13 @@
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../../app.js";
-import { getStoredJobs } from "../../services/database-jobs.service.js";
+import { getStoredJobsPage } from "../../services/database-jobs.service.js";
 
 vi.mock("../../services/database-jobs.service.js", () => ({
-  getStoredJobs: vi.fn(),
+  getStoredJobsPage: vi.fn(),
 }));
 
-const getStoredJobsMock = vi.mocked(getStoredJobs);
+const getStoredJobsPageMock = vi.mocked(getStoredJobsPage);
 
 const emptyFilters = {
   q: "",
@@ -15,6 +15,14 @@ const emptyFilters = {
   company: "",
   sources: [],
   postedWithin: "",
+};
+
+const emptyResponse = {
+  jobs: [],
+  total: 0,
+  page: 1,
+  pageSize: 18,
+  totalPages: 0,
 };
 
 const job = {
@@ -33,119 +41,122 @@ const job = {
 
 describe("GET /api/jobs", () => {
   beforeEach(() => {
-    getStoredJobsMock.mockReset();
-    getStoredJobsMock.mockResolvedValue([]);
+    getStoredJobsPageMock.mockReset();
+    getStoredJobsPageMock.mockResolvedValue(emptyResponse);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("returns stored jobs and their total", async () => {
-    getStoredJobsMock.mockResolvedValueOnce([job]);
+  it("returns jobs, total and pagination metadata", async () => {
+    const data = {
+      jobs: [job],
+      total: 1,
+      page: 1,
+      pageSize: 18,
+      totalPages: 1,
+    };
+
+    getStoredJobsPageMock.mockResolvedValueOnce(data);
 
     const response = await request(app).get("/api/jobs");
 
     expect(response.status).toBe(200);
     expect(response.headers["content-type"]).toMatch(/json/);
-    expect(response.body).toEqual({
+    expect(response.body).toEqual(data);
+    expect(getStoredJobsPageMock).toHaveBeenCalledTimes(1);
+    expect(getStoredJobsPageMock).toHaveBeenCalledWith(emptyFilters, 1);
+  });
+
+  it("returns an empty page when nothing matches", async () => {
+    const response = await request(app).get("/api/jobs");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(emptyResponse);
+  });
+
+  it("preserves the service total instead of using the page length", async () => {
+    getStoredJobsPageMock.mockResolvedValueOnce({
       jobs: [job],
-      total: 1,
+      total: 37,
+      page: 3,
+      pageSize: 18,
+      totalPages: 3,
     });
-    expect(getStoredJobsMock).toHaveBeenCalledTimes(1);
-    expect(getStoredJobsMock).toHaveBeenCalledWith(emptyFilters);
-  });
 
-  it("returns an empty array when no stored jobs are found", async () => {
-    const response = await request(app).get("/api/jobs");
+    const response = await request(app).get("/api/jobs?page=3");
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({
-      jobs: [],
-      total: 0,
-    });
+    expect(response.body.jobs).toHaveLength(1);
+    expect(response.body.total).toBe(37);
+    expect(response.body.page).toBe(3);
+    expect(getStoredJobsPageMock).toHaveBeenCalledWith(emptyFilters, 3);
   });
 
-  it("returns the correct total for multiple jobs", async () => {
-    const secondJob = {
-      ...job,
-      id: "remote-ok-456",
-      title: "Backend Developer",
-    };
-
-    getStoredJobsMock.mockResolvedValueOnce([job, secondJob]);
-
-    const response = await request(app).get("/api/jobs");
-
-    expect(response.status).toBe(200);
-    expect(response.body.jobs).toEqual([job, secondJob]);
-    expect(response.body.total).toBe(2);
-  });
-
-  it("preserves the order returned by the database service", async () => {
+  it("preserves the order returned by the service", async () => {
     const himalayasJob = {
       ...job,
       id: "himalayas-123",
       source: "Himalayas",
-      title: "Software Engineer",
     };
 
-    getStoredJobsMock.mockResolvedValueOnce([himalayasJob, job]);
+    getStoredJobsPageMock.mockResolvedValueOnce({
+      jobs: [himalayasJob, job],
+      total: 2,
+      page: 1,
+      pageSize: 18,
+      totalPages: 1,
+    });
 
     const response = await request(app).get("/api/jobs");
 
-    expect(response.status).toBe(200);
     expect(response.body.jobs).toEqual([himalayasJob, job]);
   });
 
-  it("passes validated and trimmed search parameters to the service", async () => {
+  it("passes trimmed filters and the requested page separately", async () => {
     const response = await request(app).get("/api/jobs").query({
       q: "  Frontend  ",
       location: "  Singapore  ",
       company: "  Example  ",
       source: "Himalayas",
       postedWithin: "7",
+      page: "2",
     });
 
     expect(response.status).toBe(200);
-    expect(getStoredJobsMock).toHaveBeenCalledWith({
-      q: "Frontend",
-      location: "Singapore",
-      company: "Example",
-      sources: ["Himalayas"],
-      postedWithin: "7",
-    });
+    expect(getStoredJobsPageMock).toHaveBeenCalledWith(
+      {
+        q: "Frontend",
+        location: "Singapore",
+        company: "Example",
+        sources: ["Himalayas"],
+        postedWithin: "7",
+      },
+      2,
+    );
   });
 
-  it("accepts repeated source parameters", async () => {
+  it.each([
+    ["Himalayas", "Remote OK"],
+    ["Himalayas", "Himalayas", "Remote OK"],
+  ])("accepts and deduplicates repeated sources: %j", async (...sources) => {
     const query = new URLSearchParams();
 
-    query.append("source", "Himalayas");
-    query.append("source", "Remote OK");
+    for (const source of sources) {
+      query.append("source", source);
+    }
 
-    const response = await request(app).get(`/api/jobs?${query.toString()}`);
-
-    expect(response.status).toBe(200);
-    expect(getStoredJobsMock).toHaveBeenCalledWith({
-      ...emptyFilters,
-      sources: ["Himalayas", "Remote OK"],
-    });
-  });
-
-  it("deduplicates repeated sources", async () => {
-    const query = new URLSearchParams();
-
-    query.append("source", "Himalayas");
-    query.append("source", "Himalayas");
-    query.append("source", "Remote OK");
-
-    const response = await request(app).get(`/api/jobs?${query.toString()}`);
+    const response = await request(app).get(`/api/jobs?${query}`);
 
     expect(response.status).toBe(200);
-    expect(getStoredJobsMock).toHaveBeenCalledWith({
-      ...emptyFilters,
-      sources: ["Himalayas", "Remote OK"],
-    });
+    expect(getStoredJobsPageMock).toHaveBeenCalledWith(
+      {
+        ...emptyFilters,
+        sources: ["Himalayas", "Remote OK"],
+      },
+      1,
+    );
   });
 
   it.each(["1", "7", "30"])("accepts postedWithin=%s", async (postedWithin) => {
@@ -154,10 +165,10 @@ describe("GET /api/jobs", () => {
       .query({ postedWithin });
 
     expect(response.status).toBe(200);
-    expect(getStoredJobsMock).toHaveBeenCalledWith({
-      ...emptyFilters,
-      postedWithin,
-    });
+    expect(getStoredJobsPageMock).toHaveBeenCalledWith(
+      { ...emptyFilters, postedWithin },
+      1,
+    );
   });
 
   it("accepts empty search values", async () => {
@@ -169,24 +180,26 @@ describe("GET /api/jobs", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(getStoredJobsMock).toHaveBeenCalledWith(emptyFilters);
+    expect(getStoredJobsPageMock).toHaveBeenCalledWith(emptyFilters, 1);
   });
 
-  it("preserves special characters in search values", async () => {
-    const response = await request(app).get("/api/jobs").query({
+  it("preserves special characters in searches", async () => {
+    await request(app).get("/api/jobs").query({
       q: "C++ & React",
       company: "Example_100%",
     });
 
-    expect(response.status).toBe(200);
-    expect(getStoredJobsMock).toHaveBeenCalledWith({
-      ...emptyFilters,
-      q: "C++ & React",
-      company: "Example_100%",
-    });
+    expect(getStoredJobsPageMock).toHaveBeenCalledWith(
+      {
+        ...emptyFilters,
+        q: "C++ & React",
+        company: "Example_100%",
+      },
+      1,
+    );
   });
 
-  it("ignores unrelated query parameters", async () => {
+  it("ignores unrelated parameters but accepts page", async () => {
     const response = await request(app).get("/api/jobs").query({
       q: "Frontend",
       page: "3",
@@ -194,10 +207,26 @@ describe("GET /api/jobs", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(getStoredJobsMock).toHaveBeenCalledWith({
-      ...emptyFilters,
-      q: "Frontend",
+    expect(getStoredJobsPageMock).toHaveBeenCalledWith(
+      { ...emptyFilters, q: "Frontend" },
+      3,
+    );
+  });
+
+  it("returns a clamped page supplied by the service", async () => {
+    getStoredJobsPageMock.mockResolvedValueOnce({
+      jobs: [job],
+      total: 19,
+      page: 2,
+      pageSize: 18,
+      totalPages: 2,
     });
+
+    const response = await request(app).get("/api/jobs?page=999");
+
+    expect(response.status).toBe(200);
+    expect(response.body.page).toBe(2);
+    expect(getStoredJobsPageMock).toHaveBeenCalledWith(emptyFilters, 999);
   });
 
   it.each([
@@ -207,37 +236,39 @@ describe("GET /api/jobs", () => {
     ["postedWithin", "14"],
     ["postedWithin", "-1"],
     ["postedWithin", "week"],
-  ])(
-    "returns 400 for invalid %s=%j without calling the service",
-    async (field, value) => {
-      const response = await request(app)
-        .get("/api/jobs")
-        .query({ [field]: value });
+    ["page", ""],
+    ["page", "0"],
+    ["page", "-1"],
+    ["page", "1.5"],
+    ["page", "abc"],
+    ["page", "1000001"],
+  ])("rejects invalid %s=%j", async (field, value) => {
+    const response = await request(app)
+      .get("/api/jobs")
+      .query({ [field]: value });
 
-      expect(response.status).toBe(400);
-      expect(response.body.message).toBe("Invalid job search parameters.");
-      expect(response.body.errors).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            field,
-            message: expect.any(String),
-          }),
-        ]),
-      );
-      expect(getStoredJobsMock).not.toHaveBeenCalled();
-    },
-  );
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("Invalid job search parameters.");
+    expect(response.body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field,
+          message: expect.any(String),
+        }),
+      ]),
+    );
+    expect(getStoredJobsPageMock).not.toHaveBeenCalled();
+  });
 
   it("rejects an unknown source among valid sources", async () => {
     const query = new URLSearchParams();
-
     query.append("source", "Himalayas");
     query.append("source", "Unknown");
 
-    const response = await request(app).get(`/api/jobs?${query.toString()}`);
+    const response = await request(app).get(`/api/jobs?${query}`);
 
     expect(response.status).toBe(400);
-    expect(getStoredJobsMock).not.toHaveBeenCalled();
+    expect(getStoredJobsPageMock).not.toHaveBeenCalled();
   });
 
   it("rejects more than four source entries", async () => {
@@ -253,44 +284,42 @@ describe("GET /api/jobs", () => {
       query.append("source", source);
     }
 
-    const response = await request(app).get(`/api/jobs?${query.toString()}`);
+    const response = await request(app).get(`/api/jobs?${query}`);
 
     expect(response.status).toBe(400);
-    expect(getStoredJobsMock).not.toHaveBeenCalled();
+    expect(getStoredJobsPageMock).not.toHaveBeenCalled();
   });
 
   it.each(["q", "location", "company"])(
-    "rejects %s longer than 200 characters",
+    "rejects oversized %s values",
     async (field) => {
       const response = await request(app)
         .get("/api/jobs")
         .query({ [field]: "a".repeat(201) });
 
       expect(response.status).toBe(400);
-      expect(getStoredJobsMock).not.toHaveBeenCalled();
+      expect(getStoredJobsPageMock).not.toHaveBeenCalled();
     },
   );
 
-  it.each(["q", "location", "company", "postedWithin"])(
+  it.each(["q", "location", "company", "postedWithin", "page"])(
     "rejects repeated %s values",
     async (field) => {
       const query = new URLSearchParams();
+      query.append(field, "1");
+      query.append(field, "7");
 
-      query.append(field, field === "postedWithin" ? "7" : "First");
-      query.append(field, field === "postedWithin" ? "30" : "Second");
-
-      const response = await request(app).get(`/api/jobs?${query.toString()}`);
+      const response = await request(app).get(`/api/jobs?${query}`);
 
       expect(response.status).toBe(400);
-      expect(getStoredJobsMock).not.toHaveBeenCalled();
+      expect(getStoredJobsPageMock).not.toHaveBeenCalled();
     },
   );
 
-  it("returns 500 when the database service fails", async () => {
+  it("returns a friendly 500 response and logs service errors", async () => {
     const error = new Error("Database unavailable");
-
     vi.spyOn(console, "error").mockImplementation(() => {});
-    getStoredJobsMock.mockRejectedValueOnce(error);
+    getStoredJobsPageMock.mockRejectedValueOnce(error);
 
     const response = await request(app).get("/api/jobs");
 
@@ -298,31 +327,30 @@ describe("GET /api/jobs", () => {
     expect(response.body).toEqual({
       message: "Unable to fetch jobs. Please try again later.",
     });
-    expect(response.body).not.toHaveProperty("jobs");
     expect(console.error).toHaveBeenCalledWith(
       "Failed to read stored jobs:",
       error,
     );
   });
 
-  it("does not expose database error details in the response", async () => {
+  it("does not expose database error details", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    getStoredJobsMock.mockRejectedValueOnce(
-      new Error("Sensitive database error details"),
+    getStoredJobsPageMock.mockRejectedValueOnce(
+      new Error("Sensitive database details"),
     );
 
     const response = await request(app).get("/api/jobs");
 
     expect(response.status).toBe(500);
     expect(JSON.stringify(response.body)).not.toContain(
-      "Sensitive database error details",
+      "Sensitive database details",
     );
   });
 
-  it("returns 404 for an unknown route", async () => {
+  it("returns 404 for unknown routes", async () => {
     const response = await request(app).get("/api/unknown");
 
     expect(response.status).toBe(404);
-    expect(getStoredJobsMock).not.toHaveBeenCalled();
+    expect(getStoredJobsPageMock).not.toHaveBeenCalled();
   });
 });

@@ -13,6 +13,18 @@ import {
 import JobsList from "../../app/component/JobsList";
 import type { Job } from "../../app/component/JobCard";
 
+const navigation = vi.hoisted(() => ({
+  push: vi.fn(),
+  pathname: "/",
+  query: "",
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: navigation.push }),
+  usePathname: () => navigation.pathname,
+  useSearchParams: () => new URLSearchParams(navigation.query),
+}));
+
 vi.mock("../../app/component/JobCard", () => ({
   default: ({ job }: { job: Job }) => (
     <article>
@@ -29,17 +41,17 @@ const originalScrollIntoView = Object.getOwnPropertyDescriptor(
   "scrollIntoView",
 );
 
-function createJobs(count: number): Job[] {
+function createJobs(count: number, start = 1): Job[] {
   return Array.from({ length: count }, (_, index) => ({
-    id: `job-${index + 1}`,
+    id: `job-${start + index}`,
     source: "Remote OK",
-    title: `Developer job ${index + 1}`,
+    title: `Developer job ${start + index}`,
     company: "Example",
     companyLogo: null,
-    description: "Build developer tools.",
+    description: "",
     location: "Singapore",
     tags: ["react"],
-    url: `https://example.com/jobs/${index + 1}`,
+    url: `https://example.com/jobs/${start + index}`,
     postedAt: "2026-10-08T00:00:00Z",
   }));
 }
@@ -48,6 +60,12 @@ function visiblePageNumbers() {
   return screen
     .getAllByRole("button", { name: /^Page \d+$/ })
     .map((button) => button.textContent);
+}
+
+function lastDestination() {
+  const calls = navigation.push.mock.calls;
+
+  return new URL(calls[calls.length - 1][0], "http://localhost");
 }
 
 describe("JobsList", () => {
@@ -60,6 +78,9 @@ describe("JobsList", () => {
   });
 
   beforeEach(() => {
+    navigation.push.mockReset();
+    navigation.pathname = "/";
+    navigation.query = "";
     scrollIntoViewMock.mockReset();
     matchMediaMock.mockReset();
 
@@ -93,18 +114,8 @@ describe("JobsList", () => {
     }
   });
 
-  it("shows an empty message when there are no jobs", () => {
-    render(<JobsList jobs={[]} />);
-
-    expect(screen.getByText("No jobs found.")).toBeInTheDocument();
-    expect(screen.queryByRole("article")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("navigation", { name: "Job pagination" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("shows helpful guidance in an accessible empty-results card", () => {
-    render(<JobsList jobs={[]} />);
+  it("shows the styled empty state without pagination", () => {
+    render(<JobsList jobs={[]} page={1} totalPages={0} />);
 
     expect(screen.getByRole("status")).toHaveTextContent("No jobs found.");
     expect(
@@ -115,257 +126,186 @@ describe("JobsList", () => {
         "Try a different keyword, broaden your location, or remove some filters.",
       ),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
   });
 
   it.each([1, 3, 18])(
-    "shows all %i jobs without pagination when only one page is needed",
+    "renders all %i server-provided jobs without pagination for one page",
     (count) => {
-      render(<JobsList jobs={createJobs(count)} />);
+      render(<JobsList jobs={createJobs(count)} page={1} totalPages={1} />);
 
       expect(screen.getAllByRole("article")).toHaveLength(count);
-      expect(
-        screen.queryByRole("navigation", { name: "Job pagination" }),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
     },
   );
 
-  it("shows only the first 18 jobs initially", () => {
-    render(<JobsList jobs={createJobs(39)} />);
-
-    expect(screen.getAllByRole("article")).toHaveLength(18);
-    expect(screen.getByText("Developer job 1")).toBeInTheDocument();
-    expect(screen.getByText("Developer job 18")).toBeInTheDocument();
-    expect(screen.queryByText("Developer job 19")).not.toBeInTheDocument();
-    expect(scrollIntoViewMock).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    [19, 2],
-    [36, 2],
-    [37, 3],
-    [54, 3],
-  ])("creates %i jobs with %i page buttons", (jobCount, pageCount) => {
-    render(<JobsList jobs={createJobs(jobCount)} />);
-
-    expect(screen.getAllByRole("button", { name: /^Page \d+$/ })).toHaveLength(
-      pageCount,
-    );
-
-    expect(visiblePageNumbers()).toEqual(
-      Array.from({ length: pageCount }, (_, index) => String(index + 1)),
-    );
-  });
-
-  it("marks the first page as current and disables Previous", () => {
-    render(<JobsList jobs={createJobs(39)} />);
-
-    expect(screen.getByRole("button", { name: "Page 1" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    expect(
-      screen.getByRole("button", { name: "Previous page" }),
-    ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled();
-  });
-
-  it("shows the next 18 jobs when Next is clicked", async () => {
-    const user = userEvent.setup();
-
-    render(<JobsList jobs={createJobs(39)} />);
-
-    await user.click(screen.getByRole("button", { name: "Next page" }));
+  it("renders page-two jobs without slicing them again", () => {
+    render(<JobsList jobs={createJobs(18, 19)} page={2} totalPages={3} />);
 
     expect(screen.getAllByRole("article")).toHaveLength(18);
     expect(screen.getByText("Developer job 19")).toBeInTheDocument();
     expect(screen.getByText("Developer job 36")).toBeInTheDocument();
     expect(screen.queryByText("Developer job 1")).not.toBeInTheDocument();
-    expect(screen.queryByText("Developer job 37")).not.toBeInTheDocument();
-
     expect(screen.getByRole("button", { name: "Page 2" })).toHaveAttribute(
       "aria-current",
       "page",
     );
-    expect(screen.getByRole("button", { name: "Page 1" })).not.toHaveAttribute(
-      "aria-current",
-    );
   });
 
-  it("returns to the previous page", async () => {
-    const user = userEvent.setup();
-
-    render(<JobsList jobs={createJobs(39)} />);
-
-    await user.click(screen.getByRole("button", { name: "Next page" }));
-    await user.click(screen.getByRole("button", { name: "Previous page" }));
-
-    expect(screen.getByText("Developer job 1")).toBeInTheDocument();
-    expect(screen.queryByText("Developer job 19")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Previous page" }),
-    ).toBeDisabled();
-  });
-
-  it("allows jumping directly to a numbered page", async () => {
-    const user = userEvent.setup();
-
-    render(<JobsList jobs={createJobs(39)} />);
-
-    await user.click(screen.getByRole("button", { name: "Page 3" }));
+  it("renders a partial final page", () => {
+    render(<JobsList jobs={createJobs(3, 37)} page={3} totalPages={3} />);
 
     expect(screen.getAllByRole("article")).toHaveLength(3);
-    expect(screen.getByText("Developer job 37")).toBeInTheDocument();
     expect(screen.getByText("Developer job 39")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Page 3" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-  });
-
-  it("disables Next on the last page", async () => {
-    const user = userEvent.setup();
-
-    render(<JobsList jobs={createJobs(39)} />);
-
-    await user.click(screen.getByRole("button", { name: "Page 3" }));
-    scrollIntoViewMock.mockClear();
-
-    const nextButton = screen.getByRole("button", { name: "Next page" });
-
-    expect(nextButton).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Previous page" })).toBeEnabled();
-
-    await user.click(nextButton);
-
-    expect(screen.getAllByRole("article")).toHaveLength(3);
-    expect(screen.getByText("Developer job 37")).toBeInTheDocument();
-    expect(scrollIntoViewMock).not.toHaveBeenCalled();
-  });
-
-  it("does not move or scroll before page one", async () => {
-    const user = userEvent.setup();
-
-    render(<JobsList jobs={createJobs(39)} />);
-
-    await user.click(screen.getByRole("button", { name: "Previous page" }));
-
-    expect(screen.getByText("Developer job 1")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Page 1" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    expect(scrollIntoViewMock).not.toHaveBeenCalled();
-  });
-
-  it("shows 18 jobs on a full final page", async () => {
-    const user = userEvent.setup();
-
-    render(<JobsList jobs={createJobs(36)} />);
-
-    await user.click(screen.getByRole("button", { name: "Page 2" }));
-
-    expect(screen.getAllByRole("article")).toHaveLength(18);
-    expect(screen.getByText("Developer job 36")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
   });
 
-  it("clamps the current page when fewer jobs are supplied", async () => {
-    const user = userEvent.setup();
-    const { rerender } = render(<JobsList jobs={createJobs(39)} />);
+  it.each([
+    [2, ["1", "2"]],
+    [3, ["1", "2", "3"]],
+    [4, ["1", "2", "3", "4"]],
+    [10, ["1", "2", "3", "4"]],
+  ])("shows the expected buttons for %i pages", (totalPages, expected) => {
+    render(<JobsList jobs={createJobs(18)} page={1} totalPages={totalPages} />);
 
-    await user.click(screen.getByRole("button", { name: "Page 3" }));
-
-    rerender(<JobsList jobs={createJobs(19)} />);
-
-    expect(screen.getAllByRole("article")).toHaveLength(1);
-    expect(screen.getByText("Developer job 19")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Page 2" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    expect(visiblePageNumbers()).toEqual(expected);
   });
 
-  it("removes pagination when updated results fit on one page", async () => {
-    const user = userEvent.setup();
-    const { rerender } = render(<JobsList jobs={createJobs(39)} />);
-
-    await user.click(screen.getByRole("button", { name: "Page 3" }));
-
-    rerender(<JobsList jobs={createJobs(3)} />);
-
-    expect(screen.getAllByRole("article")).toHaveLength(3);
-    expect(screen.getByText("Developer job 1")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("navigation", { name: "Job pagination" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("shows the empty state when updated results contain no jobs", () => {
-    const { rerender } = render(<JobsList jobs={createJobs(39)} />);
-
-    rerender(<JobsList jobs={[]} />);
-
-    expect(screen.getByText("No jobs found.")).toBeInTheDocument();
-    expect(screen.queryByRole("article")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("navigation", { name: "Job pagination" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it.each(["Next page", "Page 2"])(
-    "scrolls to the job list when %s is clicked",
-    async (buttonName) => {
-      const user = userEvent.setup();
-      const { container } = render(<JobsList jobs={createJobs(39)} />);
-      const jobsStart = container.firstElementChild;
-
-      await user.click(screen.getByRole("button", { name: buttonName }));
-
-      expect(matchMediaMock).toHaveBeenCalledWith(
-        "(prefers-reduced-motion: reduce)",
+  it.each([
+    [3, 10, ["1", "2", "3", "4"]],
+    [4, 10, ["2", "3", "4", "5"]],
+    [5, 10, ["3", "4", "5", "6"]],
+    [6, 7, ["4", "5", "6", "7"]],
+    [7, 7, ["4", "5", "6", "7"]],
+  ])(
+    "positions the four-button window for page %i of %i",
+    (page, totalPages, expected) => {
+      render(
+        <JobsList jobs={createJobs(18)} page={page} totalPages={totalPages} />,
       );
-      expect(scrollIntoViewMock).toHaveBeenCalledTimes(1);
-      expect(scrollIntoViewMock).toHaveBeenCalledWith({
-        behavior: "smooth",
-        block: "start",
-      });
-      expect(scrollIntoViewMock.mock.contexts[0]).toBe(jobsStart);
+
+      expect(visiblePageNumbers()).toEqual(expected);
+      expect(
+        screen.getByRole("button", { name: `Page ${page}` }),
+      ).toHaveAttribute("aria-current", "page");
     },
   );
 
-  it("scrolls to the job list when Previous is clicked", async () => {
+  it.each(["Next page", "Page 2"])(
+    "updates the URL when %s is clicked",
+    async (buttonName) => {
+      const user = userEvent.setup();
+
+      render(<JobsList jobs={createJobs(18)} page={1} totalPages={3} />);
+
+      await user.click(screen.getByRole("button", { name: buttonName }));
+
+      expect(navigation.push).toHaveBeenCalledWith("/?page=2", {
+        scroll: false,
+      });
+    },
+  );
+
+  it("preserves search and repeated source filters", async () => {
     const user = userEvent.setup();
+    navigation.query =
+      "q=C%2B%2B&location=Singapore&source=Himalayas&source=Remote+OK&company=Acme&postedWithin=7&page=2";
 
-    render(<JobsList jobs={createJobs(39)} />);
+    render(<JobsList jobs={createJobs(18, 19)} page={2} totalPages={4} />);
 
-    await user.click(screen.getByRole("button", { name: "Page 2" }));
-    scrollIntoViewMock.mockClear();
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+
+    const params = lastDestination().searchParams;
+
+    expect(params.get("q")).toBe("C++");
+    expect(params.get("location")).toBe("Singapore");
+    expect(params.getAll("source")).toEqual(["Himalayas", "Remote OK"]);
+    expect(params.get("company")).toBe("Acme");
+    expect(params.get("postedWithin")).toBe("7");
+    expect(params.getAll("page")).toEqual(["3"]);
+  });
+
+  it("removes page from the URL when returning to page one", async () => {
+    const user = userEvent.setup();
+    navigation.query = "q=react&page=2";
+
+    render(<JobsList jobs={createJobs(18, 19)} page={2} totalPages={3} />);
 
     await user.click(screen.getByRole("button", { name: "Previous page" }));
 
-    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1);
+    expect(navigation.push).toHaveBeenCalledWith("/?q=react", {
+      scroll: false,
+    });
+  });
+
+  it("uses the current pathname", async () => {
+    const user = userEvent.setup();
+    navigation.pathname = "/jobs";
+
+    render(<JobsList jobs={createJobs(18)} page={1} totalPages={3} />);
+
+    await user.click(screen.getByRole("button", { name: "Page 3" }));
+
+    expect(navigation.push).toHaveBeenCalledWith("/jobs?page=3", {
+      scroll: false,
+    });
+  });
+
+  it("does not navigate or scroll when the current page is clicked", async () => {
+    const user = userEvent.setup();
+
+    render(<JobsList jobs={createJobs(18)} page={1} totalPages={3} />);
+
+    await user.click(screen.getByRole("button", { name: "Page 1" }));
+
+    expect(navigation.push).not.toHaveBeenCalled();
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [1, "Previous page"],
+    [3, "Next page"],
+  ])("disables %s at the page boundary", async (page, buttonName) => {
+    const user = userEvent.setup();
+
+    render(<JobsList jobs={createJobs(18)} page={page} totalPages={3} />);
+
+    const button = screen.getByRole("button", { name: buttonName });
+
+    expect(button).toBeDisabled();
+
+    await user.click(button);
+
+    expect(navigation.push).not.toHaveBeenCalled();
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
+  });
+
+  it("scrolls to the results when navigating", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <JobsList jobs={createJobs(18)} page={1} totalPages={3} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+
+    expect(matchMediaMock).toHaveBeenCalledWith(
+      "(prefers-reduced-motion: reduce)",
+    );
     expect(scrollIntoViewMock).toHaveBeenCalledWith({
       behavior: "smooth",
       block: "start",
     });
+    expect(scrollIntoViewMock.mock.contexts[0]).toBe(
+      container.firstElementChild,
+    );
   });
 
-  it("scrolls instantly when reduced motion is preferred", async () => {
+  it("uses instant scrolling for reduced motion", async () => {
     const user = userEvent.setup();
+    matchMediaMock.mockReturnValue({ matches: true });
 
-    matchMediaMock.mockReturnValue({
-      matches: true,
-      media: "(prefers-reduced-motion: reduce)",
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    });
-
-    render(<JobsList jobs={createJobs(39)} />);
+    render(<JobsList jobs={createJobs(18)} page={1} totalPages={3} />);
 
     await user.click(screen.getByRole("button", { name: "Next page" }));
 
@@ -375,167 +315,43 @@ describe("JobsList", () => {
     });
   });
 
-  it("does not scroll automatically when jobs are updated", () => {
-    const { rerender } = render(<JobsList jobs={createJobs(39)} />);
-
-    rerender(<JobsList jobs={createJobs(19)} />);
-
-    expect(scrollIntoViewMock).not.toHaveBeenCalled();
-  });
-
-  it.each([55, 72, 73, 180])(
-    "shows only four page buttons for %i jobs",
-    (jobCount) => {
-      render(<JobsList jobs={createJobs(jobCount)} />);
-
-      expect(visiblePageNumbers()).toEqual(["1", "2", "3", "4"]);
-      expect(
-        screen.queryByRole("button", { name: "Page 5" }),
-      ).not.toBeInTheDocument();
-    },
-  );
-
-  it("keeps pages 1–4 visible while the current page is 3", async () => {
-    const user = userEvent.setup();
-
-    render(<JobsList jobs={createJobs(180)} />);
-
-    await user.click(screen.getByRole("button", { name: "Page 3" }));
-
-    expect(visiblePageNumbers()).toEqual(["1", "2", "3", "4"]);
-    expect(screen.getByRole("button", { name: "Page 3" })).toHaveAttribute(
-      "aria-current",
-      "page",
+  it("updates jobs and page buttons from new server props", () => {
+    const { rerender } = render(
+      <JobsList jobs={createJobs(18, 55)} page={4} totalPages={10} />,
     );
-  });
 
-  it("hides page 1 and reveals page 5 when page 4 is selected", async () => {
-    const user = userEvent.setup();
+    rerender(<JobsList jobs={createJobs(3, 37)} page={3} totalPages={3} />);
 
-    render(<JobsList jobs={createJobs(180)} />);
-
-    await user.click(screen.getByRole("button", { name: "Page 4" }));
-
-    expect(visiblePageNumbers()).toEqual(["2", "3", "4", "5"]);
-    expect(
-      screen.queryByRole("button", { name: "Page 1" }),
-    ).not.toBeInTheDocument();
-
-    expect(screen.getByRole("button", { name: "Page 4" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    expect(screen.getAllByRole("article")).toHaveLength(18);
-    expect(screen.getByText("Developer job 55")).toBeInTheDocument();
-    expect(screen.getByText("Developer job 72")).toBeInTheDocument();
-    expect(screen.queryByText("Developer job 1")).not.toBeInTheDocument();
-  });
-
-  it("slides forward again when page 5 is selected", async () => {
-    const user = userEvent.setup();
-
-    render(<JobsList jobs={createJobs(180)} />);
-
-    await user.click(screen.getByRole("button", { name: "Page 4" }));
-    await user.click(screen.getByRole("button", { name: "Page 5" }));
-
-    expect(visiblePageNumbers()).toEqual(["3", "4", "5", "6"]);
-    expect(screen.getByRole("button", { name: "Page 5" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    expect(screen.getByText("Developer job 73")).toBeInTheDocument();
-    expect(screen.getByText("Developer job 90")).toBeInTheDocument();
-  });
-
-  it("slides backward when Previous is clicked", async () => {
-    const user = userEvent.setup();
-
-    render(<JobsList jobs={createJobs(180)} />);
-
-    await user.click(screen.getByRole("button", { name: "Page 4" }));
-    await user.click(screen.getByRole("button", { name: "Page 5" }));
-    await user.click(screen.getByRole("button", { name: "Previous page" }));
-
-    expect(visiblePageNumbers()).toEqual(["2", "3", "4", "5"]);
-
-    await user.click(screen.getByRole("button", { name: "Previous page" }));
-
-    expect(visiblePageNumbers()).toEqual(["1", "2", "3", "4"]);
-    expect(screen.getByRole("button", { name: "Page 3" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-  });
-
-  it("moves the window when Next reaches page 4", async () => {
-    const user = userEvent.setup();
-
-    render(<JobsList jobs={createJobs(180)} />);
-
-    await user.click(screen.getByRole("button", { name: "Page 3" }));
-    await user.click(screen.getByRole("button", { name: "Next page" }));
-
-    expect(visiblePageNumbers()).toEqual(["2", "3", "4", "5"]);
-    expect(screen.getByRole("button", { name: "Page 4" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-  });
-
-  it("stops the window at the last page", async () => {
-    const user = userEvent.setup();
-
-    render(<JobsList jobs={createJobs(111)} />);
-
-    await user.click(screen.getByRole("button", { name: "Page 4" }));
-    await user.click(screen.getByRole("button", { name: "Page 5" }));
-    await user.click(screen.getByRole("button", { name: "Page 6" }));
-
-    expect(visiblePageNumbers()).toEqual(["4", "5", "6", "7"]);
-
-    await user.click(screen.getByRole("button", { name: "Page 7" }));
-
-    expect(visiblePageNumbers()).toEqual(["4", "5", "6", "7"]);
-    expect(screen.getByRole("button", { name: "Page 7" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
     expect(screen.getAllByRole("article")).toHaveLength(3);
-    expect(screen.getByText("Developer job 109")).toBeInTheDocument();
-    expect(screen.getByText("Developer job 111")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Page 8" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("updates the window when results shrink", async () => {
-    const user = userEvent.setup();
-    const { rerender } = render(<JobsList jobs={createJobs(180)} />);
-
-    await user.click(screen.getByRole("button", { name: "Page 4" }));
-    await user.click(screen.getByRole("button", { name: "Page 5" }));
-    await user.click(screen.getByRole("button", { name: "Page 6" }));
-
-    rerender(<JobsList jobs={createJobs(73)} />);
-
-    expect(visiblePageNumbers()).toEqual(["2", "3", "4", "5"]);
-    expect(screen.getByRole("button", { name: "Page 5" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    expect(screen.getAllByRole("article")).toHaveLength(1);
-    expect(screen.getByText("Developer job 73")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
-
-    rerender(<JobsList jobs={createJobs(37)} />);
-
+    expect(screen.getByText("Developer job 37")).toBeInTheDocument();
     expect(visiblePageNumbers()).toEqual(["1", "2", "3"]);
     expect(screen.getByRole("button", { name: "Page 3" })).toHaveAttribute(
       "aria-current",
       "page",
     );
-    expect(screen.getByText("Developer job 37")).toBeInTheDocument();
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
+  });
+
+  it("removes pagination when updated results fit on one page", () => {
+    const { rerender } = render(
+      <JobsList jobs={createJobs(18)} page={1} totalPages={3} />,
+    );
+
+    rerender(<JobsList jobs={createJobs(3)} page={1} totalPages={1} />);
+
+    expect(screen.getAllByRole("article")).toHaveLength(3);
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+  });
+
+  it("shows the empty state when updated results are empty", () => {
+    const { rerender } = render(
+      <JobsList jobs={createJobs(18)} page={1} totalPages={3} />,
+    );
+
+    rerender(<JobsList jobs={[]} page={1} totalPages={0} />);
+
+    expect(screen.getByText("No jobs found.")).toBeInTheDocument();
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
   });
 });

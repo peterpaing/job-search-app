@@ -1,6 +1,7 @@
 import {
   and,
   asc,
+  count,
   desc,
   eq,
   gte,
@@ -15,6 +16,8 @@ import { db } from "../db/index.js";
 import { jobs } from "../db/schema.js";
 import type { JobsQuery } from "../schemas/jobs-query.schema.js";
 
+export const JOBS_PER_PAGE = 18;
+
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 const emptyQuery: JobsQuery = {
@@ -26,13 +29,12 @@ const emptyQuery: JobsQuery = {
 };
 
 function containsPattern(value: string) {
-  // Treat %, _ and backslashes as literal search characters.
   const escaped = value.replace(/[\\%_]/g, "\\$&");
 
   return `%${escaped}%`;
 }
 
-export async function getStoredJobs(filters: JobsQuery = emptyQuery) {
+function buildJobsWhere(filters: JobsQuery): SQL {
   const conditions: SQL[] = [eq(jobs.isActive, true)];
 
   if (filters.sources.length > 0) {
@@ -78,7 +80,6 @@ export async function getStoredJobs(filters: JobsQuery = emptyQuery) {
   if (filters.postedWithin) {
     const now = new Date();
     const days = Number(filters.postedWithin);
-
     const cutoff = new Date(now.getTime() - days * DAY_IN_MS).toISOString();
 
     conditions.push(
@@ -87,6 +88,10 @@ export async function getStoredJobs(filters: JobsQuery = emptyQuery) {
     );
   }
 
+  return conditions.length === 1 ? conditions[0] : and(...conditions)!;
+}
+
+function selectStoredJobs(where: SQL) {
   const sourcePriority = sql<number>`
     CASE ${jobs.source}
       WHEN 'Himalayas' THEN 1
@@ -97,7 +102,7 @@ export async function getStoredJobs(filters: JobsQuery = emptyQuery) {
     END
   `;
 
-  const storedJobs = await db
+  return db
     .select({
       id: jobs.id,
       source: jobs.source,
@@ -112,12 +117,69 @@ export async function getStoredJobs(filters: JobsQuery = emptyQuery) {
       postedAt: jobs.postedAt,
     })
     .from(jobs)
-    .where(conditions.length === 1 ? conditions[0] : and(...conditions))
+    .where(where)
     .orderBy(asc(sourcePriority), desc(jobs.postedAt), asc(jobs.id));
+}
 
+type StoredJobs = Awaited<ReturnType<typeof selectStoredJobs>>;
+
+function normalizeJobs(storedJobs: StoredJobs) {
   return storedJobs.map((job) => ({
     ...job,
     description: job.description ?? "",
     postedAt: new Date(job.postedAt).toISOString(),
   }));
+}
+
+export async function getStoredJobs(filters: JobsQuery = emptyQuery) {
+  const storedJobs = await selectStoredJobs(buildJobsWhere(filters));
+
+  return normalizeJobs(storedJobs);
+}
+
+export async function getStoredJobsPage(
+  filters: JobsQuery = emptyQuery,
+  requestedPage = 1,
+) {
+  if (
+    !Number.isSafeInteger(requestedPage) ||
+    requestedPage < 1 ||
+    requestedPage > 1_000_000
+  ) {
+    throw new RangeError("Invalid job page.");
+  }
+
+  // Both queries use the exact same search conditions and date cutoff.
+  const where = buildJobsWhere(filters);
+
+  const [countResult] = await db
+    .select({ total: count() })
+    .from(jobs)
+    .where(where);
+
+  const total = countResult?.total ?? 0;
+  const totalPages = Math.ceil(total / JOBS_PER_PAGE);
+  const page = Math.min(requestedPage, Math.max(totalPages, 1));
+
+  if (total === 0) {
+    return {
+      jobs: [],
+      total: 0,
+      page: 1,
+      pageSize: JOBS_PER_PAGE,
+      totalPages: 0,
+    };
+  }
+
+  const storedJobs = await selectStoredJobs(where)
+    .limit(JOBS_PER_PAGE)
+    .offset((page - 1) * JOBS_PER_PAGE);
+
+  return {
+    jobs: normalizeJobs(storedJobs),
+    total,
+    page,
+    pageSize: JOBS_PER_PAGE,
+    totalPages,
+  };
 }
