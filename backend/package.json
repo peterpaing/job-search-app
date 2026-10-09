@@ -19,6 +19,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "jobs:import": "tsx src/scripts/import-jobs.ts",
+    "jobs:cleanup": "tsx src/scripts/cleanup-jobs.ts",
     "db:migrate:test": "drizzle-kit migrate --config drizzle.test.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.mts"
   },

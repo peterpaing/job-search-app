@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   refresh:
-    name: Import latest jobs
+    name: Import jobs and clean up old posts
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -42,5 +42,10 @@ jobs:
 
       - name: Import jobs into Neon
         run: npm run jobs:import
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Delete jobs stored more than 30 days ago
+        run: npm run jobs:cleanup
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
