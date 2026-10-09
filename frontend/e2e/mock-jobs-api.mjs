@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const PAGE_SIZE = 18;
 const createdAt = Date.now();
 
 function postedDaysAgo(days) {
@@ -34,7 +35,6 @@ function createJobs({
   }));
 }
 
-// Fixtures are already arranged in the application's source priority.
 const jobs = [
   ...createJobs({
     count: 24,
@@ -92,6 +92,18 @@ const server = createServer((req, res) => {
   }
 
   const params = url.searchParams;
+  const rawPage = params.get("page") ?? "1";
+
+  if (
+    params.getAll("page").length > 1 ||
+    !/^[1-9]\d*$/.test(rawPage) ||
+    Number(rawPage) > 1_000_000
+  ) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ message: "Invalid job search parameters." }));
+    return;
+  }
+
   const sources = params.getAll("source");
   const keyword = params.get("q") ?? "";
   const location = params.get("location") ?? "";
@@ -136,6 +148,11 @@ const server = createServer((req, res) => {
     return true;
   });
 
+  const total = matchingJobs.length;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const page = Math.min(Number(rawPage), Math.max(totalPages, 1));
+  const start = (page - 1) * PAGE_SIZE;
+
   res.writeHead(200, {
     "Content-Type": "application/json",
     "Cache-Control": "no-store",
@@ -143,8 +160,11 @@ const server = createServer((req, res) => {
 
   res.end(
     JSON.stringify({
-      jobs: matchingJobs,
-      total: matchingJobs.length,
+      jobs: matchingJobs.slice(start, start + PAGE_SIZE),
+      total,
+      page,
+      pageSize: PAGE_SIZE,
+      totalPages,
     }),
   );
 });

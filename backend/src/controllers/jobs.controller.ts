@@ -1,9 +1,9 @@
 import type { Request, Response } from "express";
-import { jobsQuerySchema } from "../schemas/jobs-query.schema.js";
-import { getStoredJobs } from "../services/database-jobs.service.js";
+import { jobsPageQuerySchema } from "../schemas/jobs-page.schema.js";
+import { getStoredJobsPage } from "../services/database-jobs.service.js";
 
 export async function jobsRouteController(req: Request, res: Response) {
-  const result = jobsQuerySchema.safeParse(req.query);
+  const result = jobsPageQuerySchema.safeParse(req.query);
 
   if (!result.success) {
     res.status(400).json({
@@ -18,12 +18,10 @@ export async function jobsRouteController(req: Request, res: Response) {
   }
 
   try {
-    const jobs = await getStoredJobs(result.data);
+    const { page, ...filters } = result.data;
+    const data = await getStoredJobsPage(filters, page);
 
-    res.json({
-      jobs,
-      total: jobs.length,
-    });
+    res.json(data);
   } catch (error) {
     console.error("Failed to read stored jobs:", error);
 
