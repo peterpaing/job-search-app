@@ -1,6 +1,12 @@
 "use client";
 
-import { Suspense, useState, useTransition, type FormEvent } from "react";
+import {
+  Suspense,
+  useRef,
+  useState,
+  useTransition,
+  type FormEvent,
+} from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 const sources = [
@@ -59,6 +65,15 @@ function hasFilters(filters: JobFilterValues) {
   );
 }
 
+function sameFilters(left: JobFilterValues, right: JobFilterValues) {
+  return (
+    left.company.trim() === right.company &&
+    left.postedWithin === right.postedWithin &&
+    left.sources.length === right.sources.length &&
+    left.sources.every((source) => right.sources.includes(source))
+  );
+}
+
 function JobFiltersForm({ initialQuery, onApply, onClear }: FilterFormProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -68,19 +83,69 @@ function JobFiltersForm({ initialQuery, onApply, onClear }: FilterFormProps) {
     readFilters(initialQuery),
   );
 
-  const [isApplied, setIsApplied] = useState(() =>
-    hasFilters(readFilters(initialQuery)),
+  const [appliedFilters, setAppliedFilters] = useState<JobFilterValues>(() =>
+    readFilters(initialQuery),
   );
 
-  function toggleSource(source: string) {
-    setFilters((previous) => ({
-      ...previous,
-      sources: previous.sources.includes(source)
-        ? previous.sources.filter((value) => value !== source)
-        : [...previous.sources, source],
-    }));
+  const appliedQueryRef = useRef(initialQuery);
 
-    setIsApplied(false);
+  const isApplied =
+    hasFilters(appliedFilters) && sameFilters(filters, appliedFilters);
+
+  function navigate(params: URLSearchParams) {
+    const query = params.toString();
+    const url = query ? `${pathname}?${query}` : pathname;
+
+    appliedQueryRef.current = query;
+
+    startTransition(() => {
+      router.push(url, { scroll: false });
+    });
+  }
+
+  function toggleSource(source: string) {
+    if (isPending) {
+      return;
+    }
+
+    const removing = filters.sources.includes(source);
+
+    setFilters({
+      ...filters,
+      sources: removing
+        ? filters.sources.filter((value) => value !== source)
+        : [...filters.sources, source],
+    });
+
+    // Newly selected sources remain drafts until Apply is clicked.
+    if (!removing || !appliedFilters.sources.includes(source)) {
+      return;
+    }
+
+    // Remove only the applied source, preserving other applied criteria.
+    const nextApplied: JobFilterValues = {
+      ...appliedFilters,
+      sources: appliedFilters.sources.filter((value) => value !== source),
+    };
+
+    const params = new URLSearchParams(appliedQueryRef.current);
+
+    params.delete("source");
+    params.delete("page");
+
+    for (const value of nextApplied.sources) {
+      params.append("source", value);
+    }
+
+    setAppliedFilters(nextApplied);
+
+    if (hasFilters(nextApplied)) {
+      onApply?.(nextApplied);
+    } else {
+      onClear?.();
+    }
+
+    navigate(params);
   }
 
   function updateField<K extends keyof JobFilterValues>(
@@ -91,17 +156,6 @@ function JobFiltersForm({ initialQuery, onApply, onClear }: FilterFormProps) {
       ...previous,
       [field]: value,
     }));
-
-    setIsApplied(false);
-  }
-
-  function navigate(params: URLSearchParams) {
-    const query = params.toString();
-    const url = query ? `${pathname}?${query}` : pathname;
-
-    startTransition(() => {
-      router.push(url, { scroll: false });
-    });
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -111,9 +165,8 @@ function JobFiltersForm({ initialQuery, onApply, onClear }: FilterFormProps) {
       return;
     }
 
-    const params = new URLSearchParams(initialQuery);
+    const params = new URLSearchParams(appliedQueryRef.current);
 
-    // Replace only filter parameters and reset URL pagination.
     params.delete("source");
     params.delete("company");
     params.delete("postedWithin");
@@ -121,33 +174,33 @@ function JobFiltersForm({ initialQuery, onApply, onClear }: FilterFormProps) {
 
     if (isApplied) {
       setFilters(emptyFilters());
-      setIsApplied(false);
+      setAppliedFilters(emptyFilters());
       onClear?.();
       navigate(params);
       return;
     }
 
-    const appliedFilters: JobFilterValues = {
+    const nextApplied: JobFilterValues = {
       sources: [...filters.sources],
       company: filters.company.trim(),
       postedWithin: filters.postedWithin,
     };
 
-    for (const source of appliedFilters.sources) {
+    for (const source of nextApplied.sources) {
       params.append("source", source);
     }
 
-    if (appliedFilters.company) {
-      params.set("company", appliedFilters.company);
+    if (nextApplied.company) {
+      params.set("company", nextApplied.company);
     }
 
-    if (appliedFilters.postedWithin) {
-      params.set("postedWithin", appliedFilters.postedWithin);
+    if (nextApplied.postedWithin) {
+      params.set("postedWithin", nextApplied.postedWithin);
     }
 
-    setFilters(appliedFilters);
-    setIsApplied(hasFilters(appliedFilters));
-    onApply?.(appliedFilters);
+    setFilters(nextApplied);
+    setAppliedFilters(nextApplied);
+    onApply?.(nextApplied);
     navigate(params);
   }
 

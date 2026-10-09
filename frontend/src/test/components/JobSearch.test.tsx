@@ -49,16 +49,11 @@ describe("JobSearch", () => {
     render(<JobSearch />);
 
     expect(
-      screen.getByRole("search", {
-        name: "Search developer jobs",
-      }),
+      screen.getByRole("search", { name: "Search developer jobs" }),
     ).toBeInTheDocument();
-
     expect(keywordInput()).toHaveValue("");
     expect(locationInput()).toHaveValue("");
-
     expect(screen.getByRole("button", { name: "Search" })).toBeInTheDocument();
-
     expect(navigation.push).not.toHaveBeenCalled();
   });
 
@@ -66,15 +61,10 @@ describe("JobSearch", () => {
     render(<JobSearch />);
 
     expect(
-      screen.queryByRole("button", {
-        name: "Clear job title or keyword",
-      }),
+      screen.queryByRole("button", { name: "Clear job title or keyword" }),
     ).not.toBeInTheDocument();
-
     expect(
-      screen.queryByRole("button", {
-        name: "Clear country or city",
-      }),
+      screen.queryByRole("button", { name: "Clear country or city" }),
     ).not.toBeInTheDocument();
   });
 
@@ -88,19 +78,12 @@ describe("JobSearch", () => {
 
     expect(keywordInput()).toHaveValue("Frontend Developer");
     expect(locationInput()).toHaveValue("Singapore");
-
     expect(
-      screen.getByRole("button", {
-        name: "Clear job title or keyword",
-      }),
+      screen.getByRole("button", { name: "Clear job title or keyword" }),
     ).toBeInTheDocument();
-
     expect(
-      screen.getByRole("button", {
-        name: "Clear country or city",
-      }),
+      screen.getByRole("button", { name: "Clear country or city" }),
     ).toBeInTheDocument();
-
     expect(navigation.push).not.toHaveBeenCalled();
   });
 
@@ -114,85 +97,73 @@ describe("JobSearch", () => {
     expect(navigation.push).not.toHaveBeenCalled();
   });
 
-  it("clears only the keyword and returns focus to its input", async () => {
+  it("clears the keyword, focuses its input and immediately updates the URL", async () => {
     const user = userEvent.setup();
-
     navigation.query = "q=Frontend+Developer&location=Singapore";
 
     render(<JobSearch />);
 
     await user.click(
-      screen.getByRole("button", {
-        name: "Clear job title or keyword",
-      }),
+      screen.getByRole("button", { name: "Clear job title or keyword" }),
     );
 
     expect(keywordInput()).toHaveValue("");
     expect(keywordInput()).toHaveFocus();
     expect(locationInput()).toHaveValue("Singapore");
-
     expect(
-      screen.queryByRole("button", {
-        name: "Clear job title or keyword",
-      }),
+      screen.queryByRole("button", { name: "Clear job title or keyword" }),
     ).not.toBeInTheDocument();
 
-    expect(navigation.push).not.toHaveBeenCalled();
+    expect(navigation.push).toHaveBeenCalledTimes(1);
+    expect(lastNavigation().searchParams.has("q")).toBe(false);
+    expect(lastNavigation().searchParams.get("location")).toBe("Singapore");
   });
 
-  it("clears only the location and returns focus to its input", async () => {
+  it("clears the location, focuses its input and immediately updates the URL", async () => {
     const user = userEvent.setup();
-
     navigation.query = "q=Frontend+Developer&location=Singapore";
 
     render(<JobSearch />);
 
     await user.click(
-      screen.getByRole("button", {
-        name: "Clear country or city",
-      }),
+      screen.getByRole("button", { name: "Clear country or city" }),
     );
 
     expect(locationInput()).toHaveValue("");
     expect(locationInput()).toHaveFocus();
     expect(keywordInput()).toHaveValue("Frontend Developer");
-
     expect(
-      screen.queryByRole("button", {
-        name: "Clear country or city",
-      }),
+      screen.queryByRole("button", { name: "Clear country or city" }),
     ).not.toBeInTheDocument();
 
-    expect(navigation.push).not.toHaveBeenCalled();
+    expect(navigation.push).toHaveBeenCalledTimes(1);
+    expect(lastNavigation().searchParams.has("location")).toBe(false);
+    expect(lastNavigation().searchParams.get("q")).toBe("Frontend Developer");
   });
 
-  it("updates the URL when Search is clicked", async () => {
+  it("updates and trims the search when Search is clicked", async () => {
     const user = userEvent.setup();
 
     render(<JobSearch />);
 
     await user.type(keywordInput(), "  C++ & React  ");
     await user.type(locationInput(), "  New York  ");
-
     await user.click(screen.getByRole("button", { name: "Search" }));
-
-    expect(navigation.push).toHaveBeenCalledTimes(1);
 
     const url = lastNavigation();
 
     expect(url.pathname).toBe("/");
     expect(url.searchParams.get("q")).toBe("C++ & React");
     expect(url.searchParams.get("location")).toBe("New York");
-
     expect(keywordInput()).toHaveValue("C++ & React");
     expect(locationInput()).toHaveValue("New York");
-
+    expect(navigation.push).toHaveBeenCalledTimes(1);
     expect(navigation.push).toHaveBeenCalledWith(expect.any(String), {
       scroll: false,
     });
   });
 
-  it("preserves sidebar filters and removes URL pagination", async () => {
+  it("preserves filters and resets URL pagination when searching", async () => {
     const user = userEvent.setup();
 
     navigation.query =
@@ -202,7 +173,6 @@ describe("JobSearch", () => {
 
     await user.type(keywordInput(), "Frontend");
     await user.type(locationInput(), "Singapore");
-
     await user.click(screen.getByRole("button", { name: "Search" }));
 
     const params = lastNavigation().searchParams;
@@ -215,20 +185,15 @@ describe("JobSearch", () => {
     expect(params.has("page")).toBe(false);
   });
 
-  it("removes a cleared keyword from the URL after Search", async () => {
+  it("removes the keyword without clicking Search", async () => {
     const user = userEvent.setup();
-
     navigation.query = "q=Frontend&location=Singapore";
 
     render(<JobSearch />);
 
     await user.click(
-      screen.getByRole("button", {
-        name: "Clear job title or keyword",
-      }),
+      screen.getByRole("button", { name: "Clear job title or keyword" }),
     );
-
-    await user.click(screen.getByRole("button", { name: "Search" }));
 
     const params = lastNavigation().searchParams;
 
@@ -236,20 +201,15 @@ describe("JobSearch", () => {
     expect(params.get("location")).toBe("Singapore");
   });
 
-  it("removes a cleared location from the URL after Search", async () => {
+  it("removes the location without clicking Search", async () => {
     const user = userEvent.setup();
-
     navigation.query = "q=Frontend&location=Singapore";
 
     render(<JobSearch />);
 
     await user.click(
-      screen.getByRole("button", {
-        name: "Clear country or city",
-      }),
+      screen.getByRole("button", { name: "Clear country or city" }),
     );
-
-    await user.click(screen.getByRole("button", { name: "Search" }));
 
     const params = lastNavigation().searchParams;
 
@@ -257,33 +217,28 @@ describe("JobSearch", () => {
     expect(params.has("location")).toBe(false);
   });
 
-  it("returns to the route without search parameters when both inputs are cleared", async () => {
+  it("removes both search parameters without restoring the first cleared field", async () => {
     const user = userEvent.setup();
-
     navigation.query = "q=Frontend&location=Singapore&page=2";
 
     render(<JobSearch />);
 
     await user.click(
-      screen.getByRole("button", {
-        name: "Clear job title or keyword",
-      }),
+      screen.getByRole("button", { name: "Clear job title or keyword" }),
     );
-
     await user.click(
-      screen.getByRole("button", {
-        name: "Clear country or city",
-      }),
+      screen.getByRole("button", { name: "Clear country or city" }),
     );
 
-    await user.click(screen.getByRole("button", { name: "Search" }));
-
-    expect(navigation.push).toHaveBeenCalledWith("/", {
+    expect(navigation.push).toHaveBeenCalledTimes(2);
+    expect(navigation.push).toHaveBeenLastCalledWith("/", {
       scroll: false,
     });
+    expect(keywordInput()).toHaveValue("");
+    expect(locationInput()).toHaveValue("");
   });
 
-  it("keeps sidebar filters when both search inputs are cleared", async () => {
+  it("keeps filters when both inputs are manually cleared and Search is clicked", async () => {
     const user = userEvent.setup();
 
     navigation.query =
@@ -293,7 +248,6 @@ describe("JobSearch", () => {
 
     await user.clear(keywordInput());
     await user.clear(locationInput());
-
     await user.click(screen.getByRole("button", { name: "Search" }));
 
     const params = lastNavigation().searchParams;
@@ -311,29 +265,23 @@ describe("JobSearch", () => {
 
     await user.type(keywordInput(), "   ");
     await user.type(locationInput(), "   ");
-
     await user.click(screen.getByRole("button", { name: "Search" }));
 
-    expect(navigation.push).toHaveBeenCalledWith("/", {
-      scroll: false,
-    });
+    expect(navigation.push).toHaveBeenCalledWith("/", { scroll: false });
     expect(keywordInput()).toHaveValue("");
     expect(locationInput()).toHaveValue("");
   });
 
-  it("replaces previous search values without duplicating parameters", async () => {
+  it("replaces previous search values without duplicate parameters", async () => {
     const user = userEvent.setup();
-
     navigation.query = "q=Frontend&location=Singapore";
 
     render(<JobSearch />);
 
     await user.clear(keywordInput());
     await user.type(keywordInput(), "Backend");
-
     await user.clear(locationInput());
     await user.type(locationInput(), "Malaysia");
-
     await user.click(screen.getByRole("button", { name: "Search" }));
 
     const params = lastNavigation().searchParams;
@@ -344,13 +292,11 @@ describe("JobSearch", () => {
 
   it("uses the current route when submitting", async () => {
     const user = userEvent.setup();
-
     navigation.pathname = "/jobs";
 
     render(<JobSearch />);
 
     await user.type(keywordInput(), "Frontend");
-
     await user.click(screen.getByRole("button", { name: "Search" }));
 
     expect(lastNavigation().pathname).toBe("/jobs");
@@ -382,5 +328,89 @@ describe("JobSearch", () => {
 
     expect(keywordInput()).toHaveValue("");
     expect(locationInput()).toHaveValue("");
+  });
+
+  it.each([
+    ["q", "Clear job title or keyword"],
+    ["location", "Clear country or city"],
+  ])(
+    "clearing applied %s preserves filters and removes pagination",
+    async (field, label) => {
+      const user = userEvent.setup();
+
+      navigation.query =
+        "q=React&location=Singapore&source=Himalayas&source=Remote+OK&company=Acme&postedWithin=7&page=3";
+
+      render(<JobSearch />);
+
+      await user.click(screen.getByRole("button", { name: label }));
+
+      const params = lastNavigation().searchParams;
+
+      expect(params.has(field)).toBe(false);
+      expect(params.get(field === "q" ? "location" : "q")).toBe(
+        field === "q" ? "Singapore" : "React",
+      );
+      expect(params.getAll("source")).toEqual(["Himalayas", "Remote OK"]);
+      expect(params.get("company")).toBe("Acme");
+      expect(params.get("postedWithin")).toBe("7");
+      expect(params.has("page")).toBe(false);
+      expect(navigation.push).toHaveBeenCalledWith(expect.any(String), {
+        scroll: false,
+      });
+    },
+  );
+
+  it.each([
+    ["keyword", "Clear job title or keyword"],
+    ["location", "Clear country or city"],
+  ])(
+    "clears an unapplied %s draft without navigating",
+    async (field, label) => {
+      const user = userEvent.setup();
+
+      render(<JobSearch />);
+
+      const input = field === "keyword" ? keywordInput() : locationInput();
+
+      await user.type(input, "Draft");
+      await user.click(screen.getByRole("button", { name: label }));
+
+      expect(input).toHaveValue("");
+      expect(input).toHaveFocus();
+      expect(navigation.push).not.toHaveBeenCalled();
+    },
+  );
+
+  it("clearing the keyword does not apply an edited location draft", async () => {
+    const user = userEvent.setup();
+    navigation.query = "q=React&location=Singapore";
+
+    render(<JobSearch />);
+
+    await user.clear(locationInput());
+    await user.type(locationInput(), "Malaysia");
+    await user.click(
+      screen.getByRole("button", { name: "Clear job title or keyword" }),
+    );
+
+    expect(lastNavigation().searchParams.has("q")).toBe(false);
+    expect(lastNavigation().searchParams.get("location")).toBe("Singapore");
+  });
+
+  it("clearing the location does not apply an edited keyword draft", async () => {
+    const user = userEvent.setup();
+    navigation.query = "q=React&location=Singapore";
+
+    render(<JobSearch />);
+
+    await user.clear(keywordInput());
+    await user.type(keywordInput(), "Python");
+    await user.click(
+      screen.getByRole("button", { name: "Clear country or city" }),
+    );
+
+    expect(lastNavigation().searchParams.has("location")).toBe(false);
+    expect(lastNavigation().searchParams.get("q")).toBe("React");
   });
 });
