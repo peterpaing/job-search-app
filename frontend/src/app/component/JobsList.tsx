@@ -5,6 +5,7 @@ import { HiChevronLeft, HiChevronRight } from "react-icons/hi2";
 import JobCard, { type Job } from "./JobCard";
 
 const JOBS_PER_PAGE = 18;
+const MAX_PAGE_BUTTONS = 4;
 
 export default function JobsList({ jobs }: { jobs: Job[] }) {
   const [page, setPage] = useState(1);
@@ -14,6 +15,17 @@ export default function JobsList({ jobs }: { jobs: Job[] }) {
   const currentPage = Math.min(page, Math.max(totalPages, 1));
   const startIndex = (currentPage - 1) * JOBS_PER_PAGE;
   const visibleJobs = jobs.slice(startIndex, startIndex + JOBS_PER_PAGE);
+
+  const pageButtonCount = Math.min(totalPages, MAX_PAGE_BUTTONS);
+  const firstVisiblePage = Math.max(
+    1,
+    Math.min(currentPage - 2, totalPages - pageButtonCount + 1),
+  );
+
+  const visiblePages = Array.from(
+    { length: pageButtonCount },
+    (_, index) => firstVisiblePage + index,
+  );
 
   function changePage(nextPage: number) {
     setPage(nextPage);
@@ -53,9 +65,8 @@ export default function JobsList({ jobs }: { jobs: Job[] }) {
             <HiChevronLeft className="h-5 w-5" aria-hidden="true" />
           </button>
 
-          <div className="flex gap-2 overflow-x-auto p-1">
-            {Array.from({ length: totalPages }, (_, index) => {
-              const pageNumber = index + 1;
+          <div className="flex gap-2 p-1">
+            {visiblePages.map((pageNumber) => {
               const isCurrent = pageNumber === currentPage;
 
               return (
