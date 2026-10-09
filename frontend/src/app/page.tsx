@@ -5,6 +5,7 @@ import JobsError from "./component/JobsError";
 import JobsLayout from "./component/JobsLayout";
 import JobsList from "./component/JobsList";
 import JobsLoading from "./component/JobsLoading";
+import JobsResultsCount from "./component/JobsResultsCount";
 
 type JobsResponse = {
   jobs: Job[];
@@ -36,7 +37,11 @@ async function JobResults({ queryString }: { queryString: string }) {
 
     data = await response.json();
 
-    if (!Array.isArray(data.jobs)) {
+    if (
+      !Array.isArray(data.jobs) ||
+      !Number.isSafeInteger(data.total) ||
+      data.total < 0
+    ) {
       throw new Error("The jobs response is invalid.");
     }
   } catch (error) {
@@ -45,7 +50,13 @@ async function JobResults({ queryString }: { queryString: string }) {
     return <JobsError />;
   }
 
-  return <JobsList key={queryString} jobs={data.jobs} />;
+  return (
+    <>
+      <JobsResultsCount total={data.total} />
+
+      <JobsList key={queryString} jobs={data.jobs} />
+    </>
+  );
 }
 
 export default async function Home({ searchParams }: HomeProps) {
