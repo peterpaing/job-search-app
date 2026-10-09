@@ -35,6 +35,44 @@ function SearchForm({ initialQuery }: { initialQuery: string }) {
 
   const keywordRef = useRef<HTMLInputElement>(null);
   const locationRef = useRef<HTMLInputElement>(null);
+  const appliedQueryRef = useRef(initialQuery);
+
+  function navigate(params: URLSearchParams) {
+    const query = params.toString();
+    const destination = query ? `${pathname}?${query}` : pathname;
+
+    appliedQueryRef.current = query;
+
+    startTransition(() => {
+      router.push(destination, { scroll: false });
+    });
+  }
+
+  function clearSearchField(field: "q" | "location") {
+    if (isPending) {
+      return;
+    }
+
+    if (field === "q") {
+      setKeyword("");
+      keywordRef.current?.focus();
+    } else {
+      setLocation("");
+      locationRef.current?.focus();
+    }
+
+    const params = new URLSearchParams(appliedQueryRef.current);
+
+    // Clearing an unapplied draft does not need a backend request.
+    if (!params.has(field)) {
+      return;
+    }
+
+    params.delete(field);
+    params.delete("page");
+
+    navigate(params);
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -43,7 +81,7 @@ function SearchForm({ initialQuery }: { initialQuery: string }) {
       return;
     }
 
-    const params = new URLSearchParams(initialQuery);
+    const params = new URLSearchParams(appliedQueryRef.current);
     const nextKeyword = keyword.trim();
     const nextLocation = location.trim();
 
@@ -62,12 +100,7 @@ function SearchForm({ initialQuery }: { initialQuery: string }) {
     setKeyword(nextKeyword);
     setLocation(nextLocation);
 
-    const query = params.toString();
-    const destination = query ? `${pathname}?${query}` : pathname;
-
-    startTransition(() => {
-      router.push(destination, { scroll: false });
-    });
+    navigate(params);
   }
 
   return (
@@ -106,10 +139,7 @@ function SearchForm({ initialQuery }: { initialQuery: string }) {
               type="button"
               aria-label="Clear job title or keyword"
               disabled={isPending}
-              onClick={() => {
-                setKeyword("");
-                keywordRef.current?.focus();
-              }}
+              onClick={() => clearSearchField("q")}
               className={clearButtonClass}
             >
               <HiOutlineXMark className="h-5 w-5" aria-hidden="true" />
@@ -146,10 +176,7 @@ function SearchForm({ initialQuery }: { initialQuery: string }) {
               type="button"
               aria-label="Clear country or city"
               disabled={isPending}
-              onClick={() => {
-                setLocation("");
-                locationRef.current?.focus();
-              }}
+              onClick={() => clearSearchField("location")}
               className={clearButtonClass}
             >
               <HiOutlineXMark className="h-5 w-5" aria-hidden="true" />

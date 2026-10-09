@@ -103,6 +103,21 @@ describe("JobsList", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows helpful guidance in an accessible empty-results card", () => {
+    render(<JobsList jobs={[]} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("No jobs found.");
+    expect(
+      screen.getByRole("heading", { name: "No jobs found." }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Try a different keyword, broaden your location, or remove some filters.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
   it.each([1, 3, 18])(
     "shows all %i jobs without pagination when only one page is needed",
     (count) => {
@@ -368,24 +383,17 @@ describe("JobsList", () => {
     expect(scrollIntoViewMock).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [55, 4],
-    [72, 4],
-    [73, 4],
-    [180, 4],
-  ])("shows at most four page buttons for %i jobs", (jobCount, buttonCount) => {
-    render(<JobsList jobs={createJobs(jobCount)} />);
+  it.each([55, 72, 73, 180])(
+    "shows only four page buttons for %i jobs",
+    (jobCount) => {
+      render(<JobsList jobs={createJobs(jobCount)} />);
 
-    expect(screen.getAllByRole("button", { name: /^Page \d+$/ })).toHaveLength(
-      buttonCount,
-    );
-
-    expect(visiblePageNumbers()).toEqual(["1", "2", "3", "4"]);
-
-    expect(
-      screen.queryByRole("button", { name: "Page 5" }),
-    ).not.toBeInTheDocument();
-  });
+      expect(visiblePageNumbers()).toEqual(["1", "2", "3", "4"]);
+      expect(
+        screen.queryByRole("button", { name: "Page 5" }),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   it("keeps pages 1–4 visible while the current page is 3", async () => {
     const user = userEvent.setup();
@@ -417,14 +425,13 @@ describe("JobsList", () => {
       "aria-current",
       "page",
     );
-
     expect(screen.getAllByRole("article")).toHaveLength(18);
     expect(screen.getByText("Developer job 55")).toBeInTheDocument();
     expect(screen.getByText("Developer job 72")).toBeInTheDocument();
     expect(screen.queryByText("Developer job 1")).not.toBeInTheDocument();
   });
 
-  it("slides the page buttons forward again when page 5 is selected", async () => {
+  it("slides forward again when page 5 is selected", async () => {
     const user = userEvent.setup();
 
     render(<JobsList jobs={createJobs(180)} />);
@@ -437,12 +444,11 @@ describe("JobsList", () => {
       "aria-current",
       "page",
     );
-
     expect(screen.getByText("Developer job 73")).toBeInTheDocument();
     expect(screen.getByText("Developer job 90")).toBeInTheDocument();
   });
 
-  it("slides the page buttons backward when Previous is clicked", async () => {
+  it("slides backward when Previous is clicked", async () => {
     const user = userEvent.setup();
 
     render(<JobsList jobs={createJobs(180)} />);
@@ -462,7 +468,7 @@ describe("JobsList", () => {
     );
   });
 
-  it("moves the page window when Next reaches page 4", async () => {
+  it("moves the window when Next reaches page 4", async () => {
     const user = userEvent.setup();
 
     render(<JobsList jobs={createJobs(180)} />);
@@ -477,10 +483,9 @@ describe("JobsList", () => {
     );
   });
 
-  it("stops the page window at the last page", async () => {
+  it("stops the window at the last page", async () => {
     const user = userEvent.setup();
 
-    // Seven pages: six full pages and a final page with three jobs.
     render(<JobsList jobs={createJobs(111)} />);
 
     await user.click(screen.getByRole("button", { name: "Page 4" }));
@@ -496,18 +501,16 @@ describe("JobsList", () => {
       "aria-current",
       "page",
     );
-
     expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
     expect(screen.getAllByRole("article")).toHaveLength(3);
     expect(screen.getByText("Developer job 109")).toBeInTheDocument();
     expect(screen.getByText("Developer job 111")).toBeInTheDocument();
-
     expect(
       screen.queryByRole("button", { name: "Page 8" }),
     ).not.toBeInTheDocument();
   });
 
-  it("updates the page window when the results shrink", async () => {
+  it("updates the window when results shrink", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<JobsList jobs={createJobs(180)} />);
 
@@ -522,7 +525,6 @@ describe("JobsList", () => {
       "aria-current",
       "page",
     );
-
     expect(screen.getAllByRole("article")).toHaveLength(1);
     expect(screen.getByText("Developer job 73")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();

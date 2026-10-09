@@ -1,7 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { HiChevronLeft, HiChevronRight } from "react-icons/hi2";
+import {
+  HiChevronLeft,
+  HiChevronRight,
+  HiOutlineMagnifyingGlass,
+} from "react-icons/hi2";
 import JobCard, { type Job } from "./JobCard";
 
 const JOBS_PER_PAGE = 18;
@@ -39,7 +43,25 @@ export default function JobsList({ jobs }: { jobs: Job[] }) {
   }
 
   if (jobs.length === 0) {
-    return <p className="text-muted">No jobs found.</p>;
+    return (
+      <div
+        role="status"
+        className="border-border bg-background flex min-h-[300px] flex-col items-center justify-center rounded-2xl border px-6 py-12 text-center sm:px-10"
+      >
+        <div className="bg-surface text-muted flex h-16 w-16 items-center justify-center rounded-full">
+          <HiOutlineMagnifyingGlass className="h-8 w-8" aria-hidden="true" />
+        </div>
+
+        <h3 className="text-primary mt-5 text-lg font-semibold">
+          No jobs found.
+        </h3>
+
+        <p className="text-muted mt-2 max-w-sm text-sm leading-relaxed">
+          Try a different keyword, broaden your location, or remove some
+          filters.
+        </p>
+      </div>
+    );
   }
 
   return (

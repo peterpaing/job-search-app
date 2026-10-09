@@ -69,7 +69,6 @@ test("applying sidebar filters changes the results", async ({ page }) => {
     .getByRole("textbox", { name: "Company", exact: true })
     .fill("Acme");
   await page.getByRole("combobox", { name: "Date posted" }).selectOption("1");
-
   await page.getByRole("button", { name: "Apply filters" }).click();
 
   await expectQuery(page, {
@@ -115,25 +114,19 @@ test("a shared URL restores search, filters and results", async ({ page }) => {
   await expect(cards(page)).toHaveCount(12);
 });
 
-test("clearing search preserves sidebar filters", async ({ page }) => {
+test("the keyword cross immediately refreshes results and preserves filters", async ({
+  page,
+}) => {
   await page.goto("/?q=node&source=Himalayas&company=Acme");
 
-  await expect(page.getByText("No jobs found.", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "No jobs found." }),
+  ).toBeVisible();
 
   await keywordInput(page).hover();
   await page
     .getByRole("button", { name: "Clear job title or keyword" })
     .click();
-
-  // Clearing the input alone does not submit a new search.
-  await expect(keywordInput(page)).toHaveValue("");
-  await expectQuery(page, {
-    q: "node",
-    source: ["Himalayas"],
-    company: "Acme",
-  });
-
-  await page.getByRole("button", { name: "Search", exact: true }).click();
 
   await expectQuery(page, {
     q: null,
@@ -141,6 +134,7 @@ test("clearing search preserves sidebar filters", async ({ page }) => {
     company: "Acme",
   });
 
+  await expect(keywordInput(page)).toHaveValue("");
   await expect(cards(page)).toHaveCount(18);
   await expect(
     page.getByRole("heading", { name: "React Developer 1", exact: true }),
@@ -154,7 +148,9 @@ test("clearing filters preserves the keyword and location", async ({
     "/?q=node&location=Malaysia&source=Himalayas&company=Acme&postedWithin=1",
   );
 
-  await expect(page.getByText("No jobs found.", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "No jobs found." }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Clear filters" }).click();
 
@@ -227,7 +223,9 @@ test("changing search resets pagination to page one", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("shows the empty state for an unmatched search", async ({ page }) => {
+test("shows the styled empty state for an unmatched search", async ({
+  page,
+}) => {
   await page.goto("/");
 
   await keywordInput(page).fill("no-matching-job-xyz");
@@ -237,9 +235,97 @@ test("shows the empty state for an unmatched search", async ({ page }) => {
     q: "no-matching-job-xyz",
   });
 
-  await expect(page.getByText("No jobs found.", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "No jobs found." }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Try a different keyword, broaden your location, or remove some filters.",
+    ),
+  ).toBeVisible();
   await expect(cards(page)).toHaveCount(0);
   await expect(
     page.getByRole("navigation", { name: "Job pagination" }),
   ).toHaveCount(0);
+});
+
+test("the location cross immediately refreshes results and preserves other criteria", async ({
+  page,
+}) => {
+  await page.goto("/?q=react&location=Germany&source=Himalayas");
+
+  await expect(
+    page.getByRole("heading", { name: "No jobs found." }),
+  ).toBeVisible();
+
+  await locationInput(page).hover();
+  await page.getByRole("button", { name: "Clear country or city" }).click();
+
+  await expectQuery(page, {
+    q: "react",
+    location: null,
+    source: ["Himalayas"],
+  });
+
+  await expect(locationInput(page)).toHaveValue("");
+  await expect(keywordInput(page)).toHaveValue("react");
+  await expect(cards(page)).toHaveCount(18);
+  await expect(
+    page.getByRole("heading", { name: "React Developer 1", exact: true }),
+  ).toBeVisible();
+});
+
+test("unchecking an applied source immediately refreshes results", async ({
+  page,
+}) => {
+  await page.goto("/?q=node&location=Malaysia&source=Himalayas");
+
+  await expect(
+    page.getByRole("heading", { name: "No jobs found." }),
+  ).toBeVisible();
+
+  await page.getByRole("checkbox", { name: "Himalayas" }).uncheck();
+
+  await expectQuery(page, {
+    q: "node",
+    location: "Malaysia",
+    source: [],
+  });
+
+  await expect(cards(page)).toHaveCount(12);
+  await expect(
+    page.getByRole("heading", { name: "Backend Developer 1", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Apply filters" }),
+  ).toBeVisible();
+});
+
+test("unchecking one source preserves the other applied source", async ({
+  page,
+}) => {
+  await page.goto("/?q=react&source=Himalayas&source=Remote+OK");
+
+  await expect(cards(page)).toHaveCount(18);
+
+  await page.getByRole("checkbox", { name: "Himalayas" }).uncheck();
+
+  await expectQuery(page, {
+    q: "react",
+    source: ["Remote OK"],
+  });
+
+  await expect(
+    page.getByRole("heading", { name: "No jobs found." }),
+  ).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "Remote OK" })).toBeChecked();
+
+  await page.getByRole("checkbox", { name: "Remote OK" }).uncheck();
+
+  await expectQuery(page, {
+    q: "react",
+    source: [],
+  });
+
+  await expect(cards(page)).toHaveCount(18);
 });
