@@ -1,5 +1,8 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
+import { useState } from "react";
 
 export type Job = {
   id: string;
@@ -14,31 +17,76 @@ export type Job = {
   postedAt: string;
 };
 
+const companyColors = [
+  "bg-blue-100 text-blue-800",
+  "bg-purple-100 text-purple-800",
+  "bg-emerald-100 text-emerald-800",
+  "bg-amber-100 text-amber-800",
+  "bg-rose-100 text-rose-800",
+  "bg-cyan-100 text-cyan-800",
+];
+
+function getCompanyInitial(company: string) {
+  return Array.from(company.trim())[0]?.toUpperCase() || "?";
+}
+
+function getCompanyColors(initial: string) {
+  const characterCode = initial.codePointAt(0) ?? 0;
+  const colorIndex = /^[A-Z]$/.test(initial)
+    ? (characterCode - 65) % companyColors.length
+    : characterCode % companyColors.length;
+
+  return companyColors[colorIndex];
+}
+
+function CompanyLogo({
+  company,
+  logoUrl,
+}: {
+  company: string;
+  logoUrl: string | null;
+}) {
+  const [hasError, setHasError] = useState(false);
+  const initial = getCompanyInitial(company);
+
+  if (!logoUrl || hasError) {
+    return (
+      <span
+        aria-hidden="true"
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-semibold ${getCompanyColors(initial)}`}
+      >
+        {initial}
+      </span>
+    );
+  }
+
+  return (
+    <Image
+      src={logoUrl}
+      alt={`${company} logo`}
+      width={40}
+      height={40}
+      unoptimized
+      onError={() => setHasError(true)}
+      className="bg-surface h-10 w-10 shrink-0 rounded-lg object-contain"
+    />
+  );
+}
+
 export default function JobCard({ job }: { job: Job }) {
   const postedDate = new Date(job.postedAt);
   const hasValidDate = !Number.isNaN(postedDate.getTime());
+  const logoUrl = job.companyLogo?.trim() || null;
 
   return (
     <article className="border-border bg-background flex min-h-[250px] flex-col rounded-2xl border p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          {job.companyLogo ? (
-            <Image
-              src={job.companyLogo}
-              alt={`${job.company} logo`}
-              width={40}
-              height={40}
-              unoptimized
-              className="bg-surface h-10 w-10 shrink-0 rounded-lg object-contain"
-            />
-          ) : (
-            <span
-              aria-hidden="true"
-              className="bg-surface text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-semibold"
-            >
-              {job.company.charAt(0).toUpperCase()}
-            </span>
-          )}
+          <CompanyLogo
+            key={JSON.stringify([job.company, logoUrl])}
+            company={job.company}
+            logoUrl={logoUrl}
+          />
 
           <div className="min-w-0">
             <p className="text-primary text-sm font-medium">{job.company}</p>
