@@ -27,6 +27,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@clerk/express": "^2.1.78",
     "@neondatabase/serverless": "^1.2.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.6",
