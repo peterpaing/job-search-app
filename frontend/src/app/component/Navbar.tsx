@@ -42,7 +42,7 @@ export default function Navbar() {
           }}
           className={`${isOpen ? "flex" : "hidden"} border-background/40 bg-background/90 absolute inset-x-4 top-full mt-2 min-h-80 flex-col items-stretch justify-evenly gap-1 rounded-2xl border p-2 shadow-[0_4px_20px_rgb(0_0_0/0.15),inset_0_1px_0_rgb(255_255_255/0.5)] backdrop-blur-xl sm:inset-x-6 lg:static lg:mt-0 lg:flex lg:min-h-0 lg:flex-row lg:items-center lg:justify-evenly lg:rounded-full lg:p-1.5 xl:w-1/2`}
         >
-          <NavLink href="/jobs">Explore</NavLink>
+          <NavLink href="/">Explore</NavLink>
           <NavLink href="/saved-jobs">Saved</NavLink>
           <NavLink href="/tracker">Application</NavLink>
 
