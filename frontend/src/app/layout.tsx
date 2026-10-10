@@ -4,6 +4,7 @@ import { Geist } from "next/font/google";
 import "./globals.css";
 import Navbar from "./component/Navbar";
 import Footer from "./component/Footer";
+import AccountSync from "./component/AccountSync";
 
 const geist = Geist({
   subsets: ["latin"],
@@ -63,6 +64,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           }}
         >
           <Navbar />
+
+          <AccountSync />
 
           <main className="flex-1">{children}</main>
 

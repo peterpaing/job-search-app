@@ -1,4 +1,11 @@
-import { boolean, index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
 
 export const jobs = pgTable(
   "jobs",
@@ -52,5 +59,26 @@ export const jobs = pgTable(
   ],
 );
 
+export const users = pgTable("users", {
+  id: uuid("id").defaultRandom().primaryKey(),
+
+  clerkUserId: text("clerk_user_id").notNull().unique(),
+
+  createdAt: timestamp("created_at", {
+    withTimezone: true,
+    mode: "string",
+  })
+    .notNull()
+    .defaultNow(),
+
+  updatedAt: timestamp("updated_at", {
+    withTimezone: true,
+    mode: "string",
+  })
+    .notNull()
+    .defaultNow(),
+});
+
 export type DatabaseJob = typeof jobs.$inferSelect;
 export type NewDatabaseJob = typeof jobs.$inferInsert;
+export type DatabaseUser = typeof users.$inferSelect;

@@ -84,3 +84,39 @@ test("recovers to signup when Back restores a stale protect-check entry", async 
 
   await expect(page.getByText("Join Dev Jobs", { exact: true })).toBeVisible();
 });
+
+test("does not sync an account or show sync errors while signed out", async ({
+  page,
+}) => {
+  const syncRequests: string[] = [];
+
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+
+    if (url.pathname === "/api/users/me" && request.method() === "POST") {
+      syncRequests.push(request.url());
+    }
+  });
+
+  for (const path of ["/sign-in", "/sign-up", "/profile"]) {
+    await page.goto(path);
+
+    const heading =
+      path === "/sign-up" ? "Join Dev Jobs" : "Sign in to Dev Jobs";
+
+    await expect(page.getByText(heading, { exact: true })).toBeVisible();
+
+    await expect(
+      page.getByText(
+        "We couldn’t connect your account. You can still browse jobs.",
+        { exact: true },
+      ),
+    ).toHaveCount(0);
+
+    await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(
+      0,
+    );
+  }
+
+  expect(syncRequests).toEqual([]);
+});
