@@ -15,6 +15,13 @@
       "when": 1791658055956,
       "tag": "0001_flawless_robin_chapel",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791661865276,
+      "tag": "0002_cute_magik",
+      "breakpoints": true
     }
   ]
 }
