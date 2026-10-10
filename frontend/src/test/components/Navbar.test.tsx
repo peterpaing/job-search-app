@@ -32,7 +32,7 @@ describe("Navbar", () => {
     expect(screen.getByRole("img", { name: "Logo" })).toBeInTheDocument();
 
     const links = [
-      ["Explore", "/jobs"],
+      ["Explore", "/"],
       ["Saved", "/saved-jobs"],
       ["Application", "/tracker"],
       ["SmartMatch", "/smart-match"],
