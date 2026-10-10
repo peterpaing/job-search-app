@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
+import SaveJobButton from "./SaveJobButton";
 
 export type Job = {
   id: string;
@@ -139,7 +140,11 @@ export default function JobCard({ job }: { job: Job }) {
         ))}
       </div>
 
-      <p className="text-muted mt-auto pt-4 text-xs">Source: {job.source}</p>
+      <div className="mt-auto flex items-start justify-between gap-3 pt-4">
+        <p className="text-muted pt-2 text-xs">Source: {job.source}</p>
+
+        <SaveJobButton job={job} />
+      </div>
     </article>
   );
 }

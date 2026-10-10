@@ -2,6 +2,7 @@ import {
   boolean,
   index,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uuid,
@@ -78,6 +79,33 @@ export const users = pgTable("users", {
     .notNull()
     .defaultNow(),
 });
+
+export const savedJobs = pgTable(
+  "saved_jobs",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+
+    savedAt: timestamp("saved_at", {
+      withTimezone: true,
+      mode: "string",
+    })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.jobId],
+    }),
+    index("saved_jobs_job_id_idx").on(table.jobId),
+    index("saved_jobs_user_saved_at_idx").on(table.userId, table.savedAt),
+  ],
+);
 
 export type DatabaseJob = typeof jobs.$inferSelect;
 export type NewDatabaseJob = typeof jobs.$inferInsert;

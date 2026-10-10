@@ -5,6 +5,9 @@ import "./globals.css";
 import Navbar from "./component/Navbar";
 import Footer from "./component/Footer";
 import AccountSync from "./component/AccountSync";
+import SavedJobsProvider, {
+  SavedJobsNotice,
+} from "./component/SavedJobsProvider";
 
 const geist = Geist({
   subsets: ["latin"],
@@ -63,13 +66,16 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             },
           }}
         >
-          <Navbar />
+          <SavedJobsProvider>
+            <Navbar />
 
-          <AccountSync />
+            <AccountSync />
+            <SavedJobsNotice />
 
-          <main className="flex-1">{children}</main>
+            <main className="flex-1">{children}</main>
 
-          <Footer />
+            <Footer />
+          </SavedJobsProvider>
         </ClerkProvider>
       </body>
     </html>

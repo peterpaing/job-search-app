@@ -56,18 +56,21 @@ describe("cleanupJobs", () => {
     });
   });
 
-  it("filters by createdAt strictly before the 30-day cutoff", async () => {
+  it("deletes old jobs only when nobody has saved them", async () => {
     await cleanupJobs();
 
     const condition = dbMocks.where.mock.calls[0]?.[0] as SQL;
     const query = dialect.sqlToQuery(condition);
+    const normalizedSql = query.sql.replace(/\s+/g, " ").trim();
 
-    expect(query.sql).toBe('"jobs"."created_at" < $1');
+    expect(normalizedSql).toContain('"jobs"."created_at" < $1');
+
+    expect(normalizedSql).toContain("NOT EXISTS");
+    expect(normalizedSql).toContain('FROM "saved_jobs"');
+
+    expect(normalizedSql).toContain('"saved_jobs"."job_id" = "jobs"."id"');
+
     expect(query.params).toEqual([EXPECTED_CUTOFF]);
-
-    expect(query.sql).not.toContain("posted_at");
-    expect(query.sql).not.toContain("updated_at");
-    expect(query.sql).not.toContain("last_seen_at");
   });
 
   it("returns the number of deleted jobs and the cutoff", async () => {
