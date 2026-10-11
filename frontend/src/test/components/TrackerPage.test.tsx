@@ -71,10 +71,7 @@ const originalShowModal = Object.getOwnPropertyDescriptor(
   "showModal",
 );
 
-const originalClose = Object.getOwnPropertyDescriptor(
-  dialogPrototype,
-  "close",
-);
+const originalClose = Object.getOwnPropertyDescriptor(dialogPrototype, "close");
 
 beforeAll(() => {
   // Emulate opening and closing dialogs in jsdom.
@@ -96,11 +93,7 @@ beforeAll(() => {
 
 afterAll(() => {
   if (originalShowModal) {
-    Object.defineProperty(
-      dialogPrototype,
-      "showModal",
-      originalShowModal,
-    );
+    Object.defineProperty(dialogPrototype, "showModal", originalShowModal);
   } else {
     Reflect.deleteProperty(dialogPrototype, "showModal");
   }
@@ -158,9 +151,7 @@ describe("TrackerPage", () => {
       }),
     ).toBeInTheDocument();
 
-    expect(
-      screen.getByRole("button", { name: "Sign in" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
   });
 
   it("shows the centered empty state", () => {
@@ -175,14 +166,12 @@ describe("TrackerPage", () => {
       name: "No applications yet",
     });
 
-    expect(heading.parentElement).toHaveClass(
-      "text-center",
-      "min-h-[340px]",
-    );
+    expect(heading.parentElement).toHaveClass("text-center", "min-h-[340px]");
 
-    expect(
-      screen.getByRole("link", { name: "Explore jobs" }),
-    ).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Explore jobs" })).toHaveAttribute(
+      "href",
+      "/",
+    );
   });
 
   it("renders the application and original listing", () => {
@@ -214,14 +203,9 @@ describe("TrackerPage", () => {
 
     expect(originalLink).toHaveAttribute("href", application.url);
     expect(originalLink).toHaveAttribute("target", "_blank");
-    expect(originalLink).toHaveAttribute(
-      "rel",
-      "noopener noreferrer",
-    );
+    expect(originalLink).toHaveAttribute("rel", "noopener noreferrer");
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      /1\s*application$/,
-    );
+    expect(screen.getByRole("status")).toHaveTextContent(/1\s*application$/);
   });
 
   it.each([
@@ -229,34 +213,31 @@ describe("TrackerPage", () => {
     ["interviewing", "Interviewing", "bg-amber-50"],
     ["offered", "Offered", "bg-emerald-50"],
     ["rejected", "Rejected", "bg-rose-50"],
-  ] as const)(
-    "uses the correct badge for %s",
-    (status, label, colorClass) => {
-      mocks.useApplications.mockReturnValue({
-        ...context(),
-        applications: [
-          {
-            ...application,
-            status: status as ApplicationStatus,
-          },
-        ],
-      });
+  ] as const)("uses the correct badge for %s", (status, label, colorClass) => {
+    mocks.useApplications.mockReturnValue({
+      ...context(),
+      applications: [
+        {
+          ...application,
+          status: status as ApplicationStatus,
+        },
+      ],
+    });
 
-      render(<TrackerPage />);
+    render(<TrackerPage />);
 
-      const badge = screen.getByText(label, {
-        selector: "span",
-      });
+    const badge = screen.getByText(label, {
+      selector: "span",
+    });
 
-      expect(badge).toHaveClass(colorClass);
+    expect(badge).toHaveClass(colorClass);
 
-      expect(
-        screen.getByRole("combobox", {
-          name: "Application status",
-        }),
-      ).toHaveValue(status);
-    },
-  );
+    expect(
+      screen.getByRole("combobox", {
+        name: "Application status",
+      }),
+    ).toHaveValue(status);
+  });
 
   it("keeps notes fixed-height and non-resizable", () => {
     render(<TrackerPage />);
@@ -278,9 +259,7 @@ describe("TrackerPage", () => {
   it("keeps Save changes disabled until something changes", () => {
     render(<TrackerPage />);
 
-    expect(
-      screen.getByRole("button", { name: "Save changes" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
   });
 
   it("submits the selected status and notes", async () => {
@@ -302,9 +281,7 @@ describe("TrackerPage", () => {
       "Interview on Friday",
     );
 
-    await user.click(
-      screen.getByRole("button", { name: "Save changes" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(mocks.update).toHaveBeenCalledWith("job-a", {
       status: "interviewing",
@@ -324,9 +301,7 @@ describe("TrackerPage", () => {
 
     await user.type(notes, "Keep this draft");
 
-    await user.click(
-      screen.getByRole("button", { name: "Save changes" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
       expect(mocks.update).toHaveBeenCalledTimes(1);
@@ -356,9 +331,7 @@ describe("TrackerPage", () => {
     });
 
     expect(dialog).toHaveAttribute("open");
-    expect(dialog).toHaveTextContent(
-      "Your saved job stays unchanged.",
-    );
+    expect(dialog).toHaveTextContent("Your saved job stays unchanged.");
 
     expect(mocks.remove).not.toHaveBeenCalled();
 
@@ -380,9 +353,7 @@ describe("TrackerPage", () => {
 
     const dialog = screen.getByRole("dialog");
 
-    await user.click(
-      within(dialog).getByRole("button", { name: "Cancel" }),
-    );
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
     expect(dialog).not.toHaveAttribute("open");
     expect(mocks.remove).not.toHaveBeenCalled();
@@ -424,13 +395,11 @@ describe("TrackerPage", () => {
 
     const dialog = screen.getByRole("dialog");
 
-    await user.click(
-      within(dialog).getByRole("button", { name: "Remove" }),
-    );
+    await user.click(within(dialog).getByRole("button", { name: "Remove" }));
 
-    expect(
-      await within(dialog).findByRole("alert"),
-    ).toHaveTextContent("We couldn’t confirm removal.");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "We couldn’t confirm removal.",
+    );
 
     expect(dialog).toHaveAttribute("open");
   });
