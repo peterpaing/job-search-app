@@ -201,4 +201,61 @@ describe("SavedJobsPage", () => {
 
     expect(mocks.reload).toHaveBeenCalledTimes(1);
   });
+
+  it("matches the application empty-state sizing and icon treatment", () => {
+    render(<SavedJobsPage />);
+
+    const panel = screen.getByRole("status");
+    const heading = screen.getByRole("heading", {
+      name: "No saved jobs yet",
+    });
+
+    expect(panel).toHaveClass(
+      "min-h-[340px]",
+      "items-center",
+      "justify-center",
+      "rounded-2xl",
+      "text-center",
+    );
+
+    expect(heading).toHaveClass("text-2xl");
+
+    const iconWrapper = panel.querySelector('div[aria-hidden="true"]');
+
+    expect(iconWrapper).toHaveClass(
+      "bg-surface",
+      "rounded-full",
+      "h-14",
+      "w-14",
+    );
+
+    expect(iconWrapper?.querySelector("svg")).not.toBeNull();
+
+    expect(screen.getByRole("link", { name: "Explore jobs" })).toHaveClass(
+      "rounded-full",
+      "py-3",
+    );
+  });
+
+  it("uses the same icon treatment in the signed-out panel", () => {
+    mocks.useSavedJobs.mockReturnValue({
+      ...context(),
+      signedIn: false,
+    });
+
+    render(<SavedJobsPage />);
+
+    const heading = screen.getByRole("heading", {
+      name: "Your shortlist starts here",
+    });
+
+    const panel = heading.parentElement;
+
+    expect(panel).toHaveClass("min-h-[340px]", "text-center");
+
+    expect(panel?.querySelector('div[aria-hidden="true"]')).toHaveClass(
+      "bg-surface",
+      "rounded-full",
+    );
+  });
 });

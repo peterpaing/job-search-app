@@ -5,6 +5,13 @@ import JobCard, { type Job } from "../../app/component/JobCard";
 vi.mock("../../app/component/SaveJobButton", () => ({
   default: () => <button type="button">Save</button>,
 }));
+const applicationMocks = vi.hoisted(() => ({
+  recordVisit: vi.fn(),
+}));
+
+vi.mock("../../app/component/ApplicationsProvider", () => ({
+  useApplicationVisit: () => applicationMocks.recordVisit,
+}));
 
 const job: Job = {
   id: "remote-ok-123",
@@ -307,5 +314,60 @@ describe("JobCard", () => {
     render(<JobCard job={{ ...job, postedAt: "" }} />);
 
     expect(screen.getByText("Posted date unavailable")).toBeInTheDocument();
+  });
+
+  it("records the listing when its details link is clicked", () => {
+    applicationMocks.recordVisit.mockClear();
+
+    render(<JobCard job={job} />);
+
+    fireEvent.click(
+      screen.getByRole("link", {
+        name: `View ${job.title} at ${job.company} (opens in a new tab)`,
+      }),
+      { button: 0 },
+    );
+
+    expect(applicationMocks.recordVisit).toHaveBeenCalledWith(job);
+    expect(applicationMocks.recordVisit).toHaveBeenCalledTimes(1);
+  });
+
+  it("records the listing when its details link is middle-clicked", () => {
+    applicationMocks.recordVisit.mockClear();
+
+    render(<JobCard job={job} />);
+
+    fireEvent(
+      screen.getByRole("link", {
+        name: `View ${job.title} at ${job.company} (opens in a new tab)`,
+      }),
+      new MouseEvent("auxclick", {
+        bubbles: true,
+        cancelable: true,
+        button: 1,
+      }),
+    );
+
+    expect(applicationMocks.recordVisit).toHaveBeenCalledWith(job);
+    expect(applicationMocks.recordVisit).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not record a right-click as a visited listing", () => {
+    applicationMocks.recordVisit.mockClear();
+
+    render(<JobCard job={job} />);
+
+    fireEvent(
+      screen.getByRole("link", {
+        name: `View ${job.title} at ${job.company} (opens in a new tab)`,
+      }),
+      new MouseEvent("auxclick", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+      }),
+    );
+
+    expect(applicationMocks.recordVisit).not.toHaveBeenCalled();
   });
 });
