@@ -56,56 +56,117 @@ test.describe("signed-out application flow", () => {
     page,
     context,
   }) => {
+    const guestStorageKey = "dev-jobs:pending-application-visits:v2:guest";
+
     await context.route("https://example.com/jobs/**", async (route) => {
       await route.fulfill({
+        status: 200,
         contentType: "text/html",
         body: "<html><body><h1>Original job listing</h1></body></html>",
       });
     });
 
-    await page.goto("/");
+    // This heading appears only after the provider is ready.
+    await page.goto("/tracker");
+
+    await expect(
+      page.getByRole("heading", {
+        name: "Your applications, in one place",
+      }),
+    ).toBeVisible();
+
+    // Use client-side navigation so the initialized provider stays mounted.
+    await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("link", { name: "Explore", exact: true })
+      .click();
+
+    await expect(page).toHaveURL(/\/$/);
 
     const link = page
       .getByRole("link", {
-        name: /opens in a new tab/,
+        name: /^View .+ \(opens in a new tab\)$/,
       })
       .first();
 
     await expect(link).toBeVisible();
 
+    const listingUrl = await link.getAttribute("href");
+
+    if (!listingUrl) {
+      throw new Error("Expected the job link to have a URL.");
+    }
+
     const popupPromise = page.waitForEvent("popup");
+
     await link.click();
+
     const popup = await popupPromise;
 
-    await popup.waitForLoadState();
-    await popup.bringToFront();
+    try {
+      await expect(
+        popup.getByRole("heading", {
+          name: "Original job listing",
+        }),
+      ).toBeVisible();
 
-    // Exercise the provider's return event deterministically.
-    await page.evaluate(() => {
-      window.dispatchEvent(new Event("blur"));
-    });
+      // Verify the real click recorded the visit before testing the return.
+      await expect
+        .poll(() =>
+          page.evaluate(
+            ({ storageKey, url }) => {
+              const visits = JSON.parse(
+                sessionStorage.getItem(storageKey) ?? "[]",
+              ) as Array<{
+                job: { url?: string };
+                confirmed: boolean;
+              }>;
 
-    await page.bringToFront();
+              return visits.some(
+                (visit) => visit.job.url === url && visit.confirmed === false,
+              );
+            },
+            {
+              storageKey: guestStorageKey,
+              url: listingUrl,
+            },
+          ),
+        )
+        .toBe(true);
 
-    await page.evaluate(() => {
-      window.dispatchEvent(new Event("focus"));
-    });
+      await page.bringToFront();
 
-    await expect(
-      page.getByRole("heading", {
+      await expect
+        .poll(() => page.evaluate(() => document.visibilityState))
+        .toBe("visible");
+
+      // Exercise the return-event handler deterministically in headless CI.
+      await page.evaluate(() => {
+        window.dispatchEvent(new Event("blur"));
+        window.dispatchEvent(new Event("focus"));
+      });
+
+      const question = page.getByRole("heading", {
         name: "Did you apply for this job?",
-      }),
-    ).toBeVisible();
+      });
 
-    await page.getByRole("button", { name: "Not yet" }).click();
+      await expect(question).toBeVisible();
 
-    await expect(
-      page.getByRole("heading", {
-        name: "Did you apply for this job?",
-      }),
-    ).toHaveCount(0);
+      await page.getByRole("button", { name: "Not yet" }).click();
 
-    await popup.close();
+      await expect(question).toHaveCount(0);
+
+      await expect
+        .poll(() =>
+          page.evaluate(
+            (storageKey) => sessionStorage.getItem(storageKey),
+            guestStorageKey,
+          ),
+        )
+        .toBeNull();
+    } finally {
+      await popup.close();
+    }
   });
 });
 
