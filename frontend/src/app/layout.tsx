@@ -17,8 +17,9 @@ const geist = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "Developer Job Search",
-  description: "Discover developer jobs and track your applications.",
+  title: "StackWing | Developer Jobs & Application Tracker",
+  description:
+    "Find developer jobs across multiple job boards, save opportunities, and track your applications with StackWing.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -30,13 +31,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           localization={{
             signIn: {
               start: {
-                title: "Sign in to Dev Jobs",
+                title: "Sign in to StackWing",
                 subtitle: "Your next opportunity starts here.",
               },
             },
             signUp: {
               start: {
-                title: "Join Dev Jobs",
+                title: "Join StackWing",
                 subtitle: "Create your account to get started.",
               },
             },

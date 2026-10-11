@@ -48,6 +48,7 @@ vi.mock("@clerk/nextjs", () => {
 
     SignIn: (props: unknown) => {
       mocks.signIn(props);
+
       return <div data-testid="signin-form">Sign-in form</div>;
     },
 
@@ -102,7 +103,9 @@ describe("ProfilePage", () => {
     render(<ProfilePage />);
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading account");
+
     expect(screen.queryByTestId("signin-form")).not.toBeInTheDocument();
+
     expect(screen.queryByTestId("account-panel")).not.toBeInTheDocument();
   });
 
@@ -110,6 +113,7 @@ describe("ProfilePage", () => {
     render(<ProfilePage />);
 
     expect(screen.getByTestId("signin-form")).toBeInTheDocument();
+
     expect(screen.queryByTestId("account-panel")).not.toBeInTheDocument();
 
     expect(mocks.signIn).toHaveBeenCalledWith(
@@ -125,6 +129,7 @@ describe("ProfilePage", () => {
     renderSignedInProfile();
 
     expect(screen.getByTestId("account-panel")).toBeInTheDocument();
+
     expect(screen.queryByTestId("signin-form")).not.toBeInTheDocument();
   });
 
@@ -183,7 +188,9 @@ describe("ProfilePage", () => {
     renderSignedInProfile();
 
     expect(
-      screen.queryByRole("heading", { name: "Account settings" }),
+      screen.queryByRole("heading", {
+        name: "Account settings",
+      }),
     ).not.toBeInTheDocument();
   });
 
@@ -195,10 +202,13 @@ describe("ProfilePage", () => {
     });
 
     expect(
-      within(subscription).getByRole("heading", { name: "Dev Jobs Pro" }),
+      within(subscription).getByRole("heading", {
+        name: "StackWing Pro",
+      }),
     ).toBeInTheDocument();
 
     expect(within(subscription).getByText("Coming soon")).toBeInTheDocument();
+
     expect(subscription).toHaveTextContent(
       "Paid subscriptions are not available yet.",
     );
@@ -207,25 +217,35 @@ describe("ProfilePage", () => {
   it("includes the privacy explanations", () => {
     renderSignedInProfile();
 
-    const privacy = screen.getByRole("region", { name: "Privacy" });
+    const privacy = screen.getByRole("region", {
+      name: "Privacy",
+    });
 
     expect(
-      within(privacy).getByRole("heading", { name: "Account information" }),
+      within(privacy).getByRole("heading", {
+        name: "Account information",
+      }),
     ).toBeInTheDocument();
 
     expect(
-      within(privacy).getByRole("heading", { name: "Profile visibility" }),
+      within(privacy).getByRole("heading", {
+        name: "Profile visibility",
+      }),
     ).toBeInTheDocument();
 
     expect(
-      within(privacy).getByRole("heading", { name: "Job browsing" }),
+      within(privacy).getByRole("heading", {
+        name: "Job browsing",
+      }),
     ).toBeInTheDocument();
   });
 
   it("shows all support categories", () => {
     renderSignedInProfile();
 
-    const help = screen.getByRole("region", { name: "Help & feedback" });
+    const help = screen.getByRole("region", {
+      name: "Help & feedback",
+    });
 
     for (const title of [
       "Broken job link",
@@ -242,7 +262,9 @@ describe("ProfilePage", () => {
     renderSignedInProfile();
 
     expect(
-      screen.queryByRole("link", { name: "Email support" }),
+      screen.queryByRole("link", {
+        name: "Email support",
+      }),
     ).not.toBeInTheDocument();
 
     expect(
@@ -255,14 +277,16 @@ describe("ProfilePage", () => {
 
     renderSignedInProfile();
 
-    const links = screen.getAllByRole("link", { name: "Email support" });
+    const links = screen.getAllByRole("link", {
+      name: "Email support",
+    });
 
     expect(links).toHaveLength(3);
 
     const subjects = [
-      "Dev Jobs: Broken job link",
-      "Dev Jobs: Report a bug",
-      "Dev Jobs: Subscription issue",
+      "StackWing: Broken job link",
+      "StackWing: Report a bug",
+      "StackWing: Subscription issue",
     ];
 
     links.forEach((link, index) => {
@@ -270,7 +294,9 @@ describe("ProfilePage", () => {
 
       expect(url.protocol).toBe("mailto:");
       expect(url.pathname).toBe("support@example.com");
+
       expect(url.searchParams.get("subject")).toBe(subjects[index]);
+
       expect(url.searchParams.get("body")).toContain("Details:");
     });
   });
@@ -281,7 +307,9 @@ describe("ProfilePage", () => {
     renderSignedInProfile();
 
     expect(
-      screen.queryByRole("link", { name: "Email support" }),
+      screen.queryByRole("link", {
+        name: "Email support",
+      }),
     ).not.toBeInTheDocument();
   });
 
@@ -317,6 +345,7 @@ describe("ProfilePage", () => {
     );
 
     expect(mocks.signOutClick).toHaveBeenCalledTimes(1);
+
     expect(mocks.signOutOptions).toHaveBeenCalledWith({
       redirectUrl: "/",
     });
@@ -333,13 +362,15 @@ describe("ProfilePage", () => {
     rerender(<ProfilePage />);
 
     expect(screen.queryByTestId("account-panel")).not.toBeInTheDocument();
+
     expect(screen.getByTestId("signin-form")).toBeInTheDocument();
   });
 
-  it("uses Dev Jobs branding instead of DVjobs", () => {
+  it("uses StackWing branding instead of the old names", () => {
     const { container } = renderSignedInProfile();
 
-    expect(container).toHaveTextContent("Dev Jobs");
-    expect(container.textContent).not.toContain("DVjobs");
+    expect(container).toHaveTextContent("StackWing");
+
+    expect(container.textContent).not.toMatch(/Dev Jobs|DVjobs/i);
   });
 });

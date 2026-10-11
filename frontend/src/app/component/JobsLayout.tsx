@@ -8,7 +8,7 @@ export default function JobsLayout({ children }: { children: ReactNode }) {
   const [showFilters, setShowFilters] = useState(false);
 
   return (
-    <section className="bg-background px-4 py-10 sm:px-6 lg:px-8">
+    <section className="bg-background px-4 pt-10 pb-16 sm:px-6 sm:pb-20 lg:px-8 lg:pb-24">
       <div className="mx-auto max-w-7xl">
         <div className="mb-6 flex items-center justify-between gap-3 sm:mb-8">
           <h2 className="text-primary min-w-0 text-xl font-semibold tracking-tight sm:text-3xl">

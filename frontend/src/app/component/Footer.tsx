@@ -27,10 +27,14 @@ export default function Footer() {
           <div className="col-span-2 md:col-span-1">
             <Link
               href="/"
-              aria-label="DVjobs home"
+              aria-label="StackWing home"
               className="focus-visible:outline-background inline-block rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4"
             >
-              <Image src={logo} alt="DVjobs" className="h-12 w-auto lg:h-14" />
+              <Image
+                src={logo}
+                alt="StackWing"
+                className="h-12 w-auto lg:h-14"
+              />
             </Link>
 
             <p className="text-background/70 mt-2 max-w-60 text-sm leading-relaxed">
@@ -74,7 +78,7 @@ export default function Footer() {
         </div>
 
         <div className="border-background/15 text-background/60 mt-6 flex flex-col items-center gap-2 border-t pt-5 text-center text-xs leading-relaxed sm:mt-8 sm:flex-row sm:justify-between sm:gap-6 sm:text-left">
-          <p className="shrink-0">© {new Date().getFullYear()} DVjobs.</p>
+          <p className="shrink-0">© {new Date().getFullYear()} StackWing.</p>
 
           <p className="max-w-72 sm:max-w-none sm:text-right">
             Job listings belong to their respective sources.

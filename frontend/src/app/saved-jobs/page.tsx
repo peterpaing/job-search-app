@@ -26,8 +26,16 @@ function BookmarkIcon() {
 export default function SavedJobsPage() {
   const { signedIn, ready, savedJobs, error, reload } = useSavedJobs();
 
+  const isEmpty = ready && signedIn && !error && savedJobs.length === 0;
+
   return (
-    <section className="bg-background min-h-[65svh] px-4 pt-10 pb-24 sm:px-6 sm:pt-12 sm:pb-32 lg:px-8">
+    <section
+      className={`bg-background px-4 pt-10 sm:px-6 sm:pt-12 lg:px-8 ${
+        isEmpty
+          ? "min-h-[85svh] pb-32 sm:pb-40 lg:pb-48"
+          : "min-h-[65svh] pb-24 sm:pb-32"
+      }`}
+    >
       <div className="mx-auto max-w-7xl">
         {error ? (
           <div role="alert" className={panelClass}>

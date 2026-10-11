@@ -4,11 +4,14 @@ test("shows the login form on the sign-in page", async ({ page }) => {
   await page.goto("/sign-in");
 
   await expect(
-    page.getByText("Sign in to Dev Jobs", { exact: true }),
+    page.getByText("Sign in to StackWing", { exact: true }),
   ).toBeVisible();
 
   await expect(
-    page.getByRole("button", { name: "Continue", exact: true }),
+    page.getByRole("button", {
+      name: "Continue",
+      exact: true,
+    }),
   ).toBeVisible();
 });
 
@@ -17,14 +20,19 @@ test("shows the signup form without the removed recovery text", async ({
 }) => {
   await page.goto("/sign-up");
 
-  await expect(page.getByText("Join Dev Jobs", { exact: true })).toBeVisible();
+  await expect(page.getByText("Join StackWing", { exact: true })).toBeVisible();
 
   await expect(
-    page.getByRole("button", { name: "Continue", exact: true }),
+    page.getByRole("button", {
+      name: "Continue",
+      exact: true,
+    }),
   ).toBeVisible();
 
   await expect(
-    page.getByText("Having trouble completing signup?", { exact: true }),
+    page.getByText("Having trouble completing signup?", {
+      exact: true,
+    }),
   ).toHaveCount(0);
 
   await expect(
@@ -38,15 +46,19 @@ test("shows login rather than account settings on signed-out Profile", async ({
   await page.goto("/profile");
 
   await expect(
-    page.getByText("Sign in to Dev Jobs", { exact: true }),
+    page.getByText("Sign in to StackWing", { exact: true }),
   ).toBeVisible();
 
   await expect(
-    page.getByRole("button", { name: "Delete account — unavailable" }),
+    page.getByRole("button", {
+      name: "Delete account — unavailable",
+    }),
   ).toHaveCount(0);
 
   await expect(
-    page.getByRole("heading", { name: "Account settings" }),
+    page.getByRole("heading", {
+      name: "Account settings",
+    }),
   ).toHaveCount(0);
 });
 
@@ -55,7 +67,7 @@ test("recovers to signup when Back restores a stale protect-check entry", async 
 }) => {
   await page.goto("/sign-up");
 
-  await expect(page.getByText("Join Dev Jobs", { exact: true })).toBeVisible();
+  await expect(page.getByText("Join StackWing", { exact: true })).toBeVisible();
 
   // Simulate stale signup history without submitting an account.
   // Preserve Next.js history metadata.
@@ -75,14 +87,13 @@ test("recovers to signup when Back restores a stale protect-check entry", async 
 
   await expect(page).toHaveURL(/\/sign-up\/verify-email-address$/);
 
-  // Equivalent history traversal to pressing browser Back.
   await page.evaluate(() => {
     window.history.back();
   });
 
   await expect(page).toHaveURL(/\/sign-up$/);
 
-  await expect(page.getByText("Join Dev Jobs", { exact: true })).toBeVisible();
+  await expect(page.getByText("Join StackWing", { exact: true })).toBeVisible();
 });
 
 test("does not sync an account or show sync errors while signed out", async ({
@@ -102,7 +113,7 @@ test("does not sync an account or show sync errors while signed out", async ({
     await page.goto(path);
 
     const heading =
-      path === "/sign-up" ? "Join Dev Jobs" : "Sign in to Dev Jobs";
+      path === "/sign-up" ? "Join StackWing" : "Sign in to StackWing";
 
     await expect(page.getByText(heading, { exact: true })).toBeVisible();
 

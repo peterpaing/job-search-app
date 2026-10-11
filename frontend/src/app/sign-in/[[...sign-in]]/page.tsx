@@ -10,7 +10,7 @@ export default function SignInPage() {
           </h1>
 
           <p className="text-muted mt-3 text-sm sm:text-base">
-            Sign in to your DVjobs account.
+            Sign in to your StackWing account.
           </p>
         </div>
 
