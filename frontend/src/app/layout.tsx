@@ -68,18 +68,16 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           }}
         >
           <SavedJobsProvider>
-            <SavedJobsProvider>
-              <ApplicationsProvider>
-                <Navbar />
+            <ApplicationsProvider>
+              <Navbar />
 
-                <AccountSync />
-                <SavedJobsNotice />
+              <AccountSync />
+              <SavedJobsNotice />
 
-                <main className="flex-1">{children}</main>
+              <main className="flex-1">{children}</main>
 
-                <Footer />
-              </ApplicationsProvider>
-            </SavedJobsProvider>
+              <Footer />
+            </ApplicationsProvider>
           </SavedJobsProvider>
         </ClerkProvider>
       </body>
