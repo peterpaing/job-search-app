@@ -28,7 +28,6 @@ function signedInAuth() {
   };
 }
 
-// Combine real abort signals while controlling the timeout in tests.
 function combineSignals(signals: AbortSignal[]) {
   const controller = new AbortController();
 
@@ -38,7 +37,9 @@ function combineSignals(signals: AbortSignal[]) {
       break;
     }
 
-    signal.addEventListener("abort", () => controller.abort(), { once: true });
+    signal.addEventListener("abort", () => controller.abort(), {
+      once: true,
+    });
   }
 
   return controller.signal;
@@ -98,6 +99,7 @@ describe("AccountSync", () => {
 
     expect(mocks.getToken).not.toHaveBeenCalled();
     expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("sends the session token to the configured backend", async () => {
@@ -122,7 +124,6 @@ describe("AccountSync", () => {
       signal: expect.any(Object),
     });
 
-    // Identity must come from the verified token, not a body.
     expect(options).not.toHaveProperty("body");
   });
 
@@ -298,5 +299,77 @@ describe("AccountSync", () => {
     });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(errorMessage);
+  });
+
+  it("shows the error as a compact floating notice", async () => {
+    mocks.fetch.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    render(<AccountSync />);
+
+    const notice = await screen.findByRole("alert");
+
+    expect(notice).toHaveTextContent("Account connection interrupted");
+    expect(notice).toHaveTextContent(errorMessage);
+    expect(notice).toHaveClass("fixed", "max-w-sm");
+
+    expect(
+      screen.getByRole("button", {
+        name: "Dismiss account connection notice",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("dismisses the notice without sending another request", async () => {
+    const user = userEvent.setup();
+
+    mocks.fetch.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const { rerender } = render(<AccountSync />);
+
+    await screen.findByRole("alert");
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Dismiss account connection notice",
+      }),
+    );
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    rerender(<AccountSync />);
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.getToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not hide a new session error after dismissing an old one", async () => {
+    const user = userEvent.setup();
+
+    mocks.fetch.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const { rerender } = render(<AccountSync />);
+
+    await screen.findByRole("alert");
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Dismiss account connection notice",
+      }),
+    );
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    mocks.useAuth.mockReturnValue({
+      ...signedInAuth(),
+      userId: "user_second",
+      sessionId: "session_second",
+    });
+
+    rerender(<AccountSync />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(errorMessage);
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
   });
 });

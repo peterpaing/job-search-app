@@ -2,14 +2,26 @@
 
 import { SignInButton } from "@clerk/nextjs";
 import Link from "next/link";
+import { FiBookmark } from "react-icons/fi";
 import JobCard from "../component/JobCard";
 import { useSavedJobs } from "../component/SavedJobsProvider";
 
 const buttonClass =
-  "bg-primary text-background focus-visible:outline-primary inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2";
+  "bg-primary text-background focus-visible:outline-primary inline-flex items-center justify-center rounded-full px-5 py-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2";
 
 const panelClass =
-  "border-border flex min-h-[300px] flex-col items-center justify-center rounded-2xl border px-6 py-12 text-center sm:min-h-[340px] sm:px-8";
+  "border-border flex min-h-[340px] flex-col items-center justify-center rounded-2xl border px-6 py-12 text-center";
+
+function BookmarkIcon() {
+  return (
+    <div
+      aria-hidden="true"
+      className="bg-surface text-muted mb-5 flex h-14 w-14 items-center justify-center rounded-full"
+    >
+      <FiBookmark className="h-6 w-6" />
+    </div>
+  );
+}
 
 export default function SavedJobsPage() {
   const { signedIn, ready, savedJobs, error, reload } = useSavedJobs();
@@ -76,11 +88,13 @@ export default function SavedJobsPage() {
           </div>
         ) : !signedIn ? (
           <div className={panelClass}>
-            <h1 className="text-primary text-xl font-semibold">
+            <BookmarkIcon />
+
+            <h1 className="text-primary text-2xl font-semibold">
               Your shortlist starts here
             </h1>
 
-            <p className="text-muted mt-3 max-w-md text-sm leading-relaxed">
+            <p className="text-muted mt-3 max-w-md text-sm">
               Keep opportunities you want to revisit.
             </p>
 
@@ -92,11 +106,13 @@ export default function SavedJobsPage() {
           </div>
         ) : savedJobs.length === 0 ? (
           <div role="status" className={panelClass}>
-            <h1 className="text-primary text-xl font-semibold">
+            <BookmarkIcon />
+
+            <h1 className="text-primary text-2xl font-semibold">
               No saved jobs yet
             </h1>
 
-            <p className="text-muted mt-3 max-w-md text-sm leading-relaxed">
+            <p className="text-muted mt-3 max-w-md text-sm">
               Keep opportunities you want to revisit.
             </p>
 

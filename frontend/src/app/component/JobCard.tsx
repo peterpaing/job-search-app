@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 import SaveJobButton from "./SaveJobButton";
+import { useApplicationVisit } from "./ApplicationsProvider";
 
 export type Job = {
   id: string;
@@ -75,6 +76,7 @@ function CompanyLogo({
 }
 
 export default function JobCard({ job }: { job: Job }) {
+  const recordVisit = useApplicationVisit();
   const postedDate = new Date(job.postedAt);
   const hasValidDate = !Number.isNaN(postedDate.getTime());
   const logoUrl = job.companyLogo?.trim() || null;
@@ -103,6 +105,16 @@ export default function JobCard({ job }: { job: Job }) {
           target="_blank"
           rel="noopener noreferrer"
           aria-label={`View ${job.title} at ${job.company} (opens in a new tab)`}
+          onClick={(event) => {
+            if (!event.defaultPrevented && event.button === 0) {
+              recordVisit?.(job);
+            }
+          }}
+          onAuxClick={(event) => {
+            if (!event.defaultPrevented && event.button === 1) {
+              recordVisit?.(job);
+            }
+          }}
           className="text-primary shrink-0 text-xs font-medium whitespace-nowrap hover:underline"
         >
           View job details

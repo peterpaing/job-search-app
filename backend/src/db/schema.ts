@@ -6,6 +6,8 @@ import {
   text,
   timestamp,
   uuid,
+  pgEnum,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const jobs = pgTable(
@@ -107,6 +109,55 @@ export const savedJobs = pgTable(
   ],
 );
 
+export const applicationStatus = pgEnum("application_status", [
+  "applied",
+  "interviewing",
+  "offered",
+  "rejected",
+]);
+
+export const applications = pgTable(
+  "applications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+    // Intentionally not a foreign key to jobs.
+    // Job cleanup must not remove application history.
+    jobId: text("job_id").notNull(),
+
+    // Snapshot the original listing using trusted database values.
+    title: text("title").notNull(),
+    company: text("company").notNull(),
+    url: text("url").notNull(),
+
+    status: applicationStatus("status").notNull().default("applied"),
+    notes: text("notes").notNull().default(""),
+
+    appliedAt: timestamp("applied_at", {
+      withTimezone: true,
+      mode: "string",
+    })
+      .notNull()
+      .defaultNow(),
+
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "string",
+    })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("applications_user_job_unique").on(table.userId, table.jobId),
+    index("applications_user_applied_at_idx").on(table.userId, table.appliedAt),
+  ],
+);
+
+export type DatabaseApplication = typeof applications.$inferSelect;
 export type DatabaseJob = typeof jobs.$inferSelect;
 export type NewDatabaseJob = typeof jobs.$inferInsert;
 export type DatabaseUser = typeof users.$inferSelect;
