@@ -26,10 +26,10 @@ describe("Navbar", () => {
     vi.mocked(usePathname).mockReturnValue("/");
   });
 
-  it("renders the logo and navigation destinations", () => {
+  it("renders the StackWing logo and navigation destinations", () => {
     render(<Navbar />);
 
-    expect(screen.getByRole("img", { name: "Logo" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "StackWing" })).toBeInTheDocument();
 
     const links = [
       ["Explore", "/"],
@@ -47,7 +47,10 @@ describe("Navbar", () => {
   it("starts with the menu collapsed", () => {
     render(<Navbar />);
 
-    const button = screen.getByRole("button", { name: "Open navigation" });
+    const button = screen.getByRole("button", {
+      name: "Open navigation",
+    });
+
     const navigation = screen.getByRole("navigation", {
       name: "Main navigation",
     });
@@ -59,6 +62,7 @@ describe("Navbar", () => {
 
   it("opens and closes the menu when the button is clicked", async () => {
     const user = userEvent.setup();
+
     render(<Navbar />);
 
     const navigation = screen.getByRole("navigation", {
@@ -80,11 +84,13 @@ describe("Navbar", () => {
     expect(
       screen.getByRole("button", { name: "Open navigation" }),
     ).toHaveAttribute("aria-expanded", "false");
+
     expect(navigation).toHaveClass("hidden");
   });
 
   it("closes the menu when nested content inside a link is clicked", async () => {
     const user = userEvent.setup();
+
     render(<Navbar />);
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }));

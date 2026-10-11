@@ -15,7 +15,12 @@ export default function Navbar() {
   return (
     <header className="border-background/10 bg-primary sticky top-0 z-50 border-b">
       <div className="relative mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-        <Image src={logo} alt="Logo" className="h-15 w-auto lg:h-20" priority />
+        <Image
+          src={logo}
+          alt="StackWing"
+          className="h-15 w-auto lg:h-15"
+          priority
+        />
 
         <button
           type="button"
@@ -27,7 +32,7 @@ export default function Navbar() {
             isOpen
               ? "border-background/25 bg-background/15 shadow-[inset_0_1px_0_rgb(255_255_255/0.2)] backdrop-blur-xl"
               : "hover:bg-background/10 border-transparent"
-          } `}
+          }`}
         >
           <HiOutlineBars3 className="h-7 w-7" aria-hidden="true" />
         </button>

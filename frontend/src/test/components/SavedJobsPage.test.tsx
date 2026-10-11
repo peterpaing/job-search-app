@@ -76,7 +76,6 @@ describe("SavedJobsPage", () => {
     const { container } = render(<SavedJobsPage />);
 
     expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true");
-
     expect(screen.getByText("Loading saved jobs…")).toHaveClass("sr-only");
 
     const grid = container.querySelector('[aria-hidden="true"] .grid');
@@ -152,7 +151,6 @@ describe("SavedJobsPage", () => {
     expect(count).toHaveClass("rounded-full", "bg-surface");
     expect(count.parentElement).toHaveClass("justify-start");
     expect(count).toHaveAttribute("aria-live", "polite");
-
     expect(screen.getAllByRole("article")).toHaveLength(2);
   });
 
@@ -257,5 +255,75 @@ describe("SavedJobsPage", () => {
       "bg-surface",
       "rounded-full",
     );
+  });
+
+  it("adds extra bottom space for the loaded signed-in empty state", () => {
+    const { container } = render(<SavedJobsPage />);
+    const section = container.firstElementChild;
+
+    expect(section?.tagName).toBe("SECTION");
+    expect(section).toHaveClass(
+      "min-h-[85svh]",
+      "pb-32",
+      "sm:pb-40",
+      "lg:pb-48",
+    );
+
+    for (const className of ["min-h-[65svh]", "pb-24", "sm:pb-32"]) {
+      expect(section).not.toHaveClass(className);
+    }
+  });
+
+  it.each([
+    {
+      name: "populated",
+      signedIn: true,
+      ready: true,
+      savedJobs: [savedJob],
+      error: null,
+    },
+    {
+      name: "loading",
+      signedIn: true,
+      ready: false,
+      savedJobs: [],
+      error: null,
+    },
+    {
+      name: "signed out",
+      signedIn: false,
+      ready: true,
+      savedJobs: [],
+      error: null,
+    },
+    {
+      name: "error",
+      signedIn: true,
+      ready: true,
+      savedJobs: [],
+      error: "Unable to load saved jobs.",
+    },
+  ])("keeps normal spacing when $name", (state) => {
+    mocks.useSavedJobs.mockReturnValue({
+      ...context(),
+      signedIn: state.signedIn,
+      ready: state.ready,
+      savedJobs: state.savedJobs,
+      error: state.error,
+    });
+
+    const { container } = render(<SavedJobsPage />);
+    const section = container.firstElementChild;
+
+    expect(section).toHaveClass("min-h-[65svh]", "pb-24", "sm:pb-32");
+
+    for (const className of [
+      "min-h-[85svh]",
+      "pb-32",
+      "sm:pb-40",
+      "lg:pb-48",
+    ]) {
+      expect(section).not.toHaveClass(className);
+    }
   });
 });

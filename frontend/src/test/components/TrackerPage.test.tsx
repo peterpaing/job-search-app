@@ -74,8 +74,7 @@ const originalShowModal = Object.getOwnPropertyDescriptor(
 const originalClose = Object.getOwnPropertyDescriptor(dialogPrototype, "close");
 
 beforeAll(() => {
-  // Emulate opening and closing dialogs in jsdom.
-  // Real focus containment and Escape behavior need browser tests.
+  // Emulate dialogs in jsdom. Browser tests cover native dialog behavior.
   Object.defineProperty(dialogPrototype, "showModal", {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -204,7 +203,6 @@ describe("TrackerPage", () => {
     expect(originalLink).toHaveAttribute("href", application.url);
     expect(originalLink).toHaveAttribute("target", "_blank");
     expect(originalLink).toHaveAttribute("rel", "noopener noreferrer");
-
     expect(screen.getByRole("status")).toHaveTextContent(/1\s*application$/);
   });
 
@@ -300,7 +298,6 @@ describe("TrackerPage", () => {
     });
 
     await user.type(notes, "Keep this draft");
-
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
@@ -332,7 +329,6 @@ describe("TrackerPage", () => {
 
     expect(dialog).toHaveAttribute("open");
     expect(dialog).toHaveTextContent("Your saved job stays unchanged.");
-
     expect(mocks.remove).not.toHaveBeenCalled();
 
     expect(
@@ -450,5 +446,80 @@ describe("TrackerPage", () => {
     );
 
     expect(mocks.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds extra bottom space for the loaded signed-in empty state", () => {
+    mocks.useApplications.mockReturnValue({
+      ...context(),
+      applications: [],
+    });
+
+    const { container } = render(<TrackerPage />);
+    const section = container.firstElementChild;
+
+    expect(section?.tagName).toBe("SECTION");
+    expect(section).toHaveClass(
+      "min-h-[85svh]",
+      "pb-32",
+      "sm:pb-40",
+      "lg:pb-48",
+    );
+
+    for (const className of ["min-h-[65svh]", "pb-24", "sm:pb-32"]) {
+      expect(section).not.toHaveClass(className);
+    }
+  });
+
+  it.each([
+    {
+      name: "populated",
+      signedIn: true,
+      ready: true,
+      applications: [application],
+      error: null,
+    },
+    {
+      name: "loading",
+      signedIn: true,
+      ready: false,
+      applications: [],
+      error: null,
+    },
+    {
+      name: "signed out",
+      signedIn: false,
+      ready: true,
+      applications: [],
+      error: null,
+    },
+    {
+      name: "error",
+      signedIn: true,
+      ready: true,
+      applications: [],
+      error: "Unable to load applications.",
+    },
+  ])("keeps normal spacing when $name", (state) => {
+    mocks.useApplications.mockReturnValue({
+      ...context(),
+      signedIn: state.signedIn,
+      ready: state.ready,
+      applications: state.applications,
+      error: state.error,
+    });
+
+    const { container } = render(<TrackerPage />);
+    const section = container.firstElementChild;
+
+    expect(section).toHaveClass("min-h-[65svh]", "pb-24", "sm:pb-32");
+
+    for (const className of [
+      "min-h-[85svh]",
+      "pb-32",
+      "sm:pb-40",
+      "lg:pb-48",
+    ]) {
+      expect(section).not.toHaveClass(className);
+    }
   });
 });

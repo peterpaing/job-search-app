@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@clerk/nextjs", () => ({
   SignIn: (props: unknown) => {
     mocks.signIn(props);
+
     return <div data-testid="signin-form">Sign-in form</div>;
   },
 }));
@@ -35,5 +36,15 @@ describe("SignInPage", () => {
         fallbackRedirectUrl: "/profile",
       }),
     );
+  });
+
+  it("uses StackWing branding", () => {
+    const { container } = render(<SignInPage />);
+
+    expect(
+      screen.getByText("Sign in to your StackWing account."),
+    ).toBeInTheDocument();
+
+    expect(container.textContent).not.toMatch(/DVjobs|Dev Jobs/i);
   });
 });

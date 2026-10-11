@@ -46,7 +46,7 @@ function ProSubscription() {
           Coming soon
         </span>
 
-        <h3 className="mt-4 text-base font-semibold">Dev Jobs Pro</h3>
+        <h3 className="mt-4 text-base font-semibold">StackWing Pro</h3>
 
         <p className="text-muted mt-2 text-sm leading-relaxed">
           Paid subscriptions are not available yet. Plan details, benefits, and
@@ -77,7 +77,7 @@ function Privacy() {
           <h3 className="text-sm font-semibold">Profile visibility</h3>
 
           <p className="text-muted mt-2 text-sm leading-relaxed">
-            Dev Jobs does not currently provide a public member profile page.
+            StackWing does not currently provide a public member profile page.
             Your account panel is intended for you to manage your own account.
           </p>
         </div>
@@ -120,7 +120,7 @@ function HelpAndFeedback() {
   return (
     <AccountSection
       title="Help & feedback"
-      description="Report an issue or tell us how Dev Jobs can improve."
+      description="Report an issue or tell us how StackWing can improve."
     >
       <div className="space-y-4">
         {issues.map((issue) => (
@@ -137,7 +137,7 @@ function HelpAndFeedback() {
             {supportEmail && (
               <a
                 href={`mailto:${supportEmail}?subject=${encodeURIComponent(
-                  `Dev Jobs: ${issue.title}`,
+                  `StackWing: ${issue.title}`,
                 )}&body=${encodeURIComponent(
                   `${issue.description}\n\nDetails:\n`,
                 )}`}
@@ -171,8 +171,8 @@ function DeleteAccount() {
         </h3>
 
         <p className="mt-2 text-sm leading-relaxed text-red-800">
-          We need a secure backend flow that removes your Dev Jobs data and your
-          Clerk account together. Deleting only the Clerk account would not
+          We need a secure backend flow that removes your StackWing data and
+          your Clerk account together. Deleting only the Clerk account would not
           automatically remove data stored in our database.
         </p>
 
@@ -192,7 +192,7 @@ function SignOut() {
   return (
     <AccountSection
       title="Sign out"
-      description="Sign out of Dev Jobs on this browser."
+      description="Sign out of StackWing on this browser."
     >
       <div className="border-border rounded-2xl border p-5 sm:p-6">
         <p className="text-muted mb-5 text-sm leading-relaxed">
