@@ -2,6 +2,7 @@
 
 import { useAuth } from "@clerk/nextjs";
 import { useEffect, useState } from "react";
+import { FiAlertCircle, FiRefreshCw, FiX } from "react-icons/fi";
 
 type SyncError = {
   sessionId: string;
@@ -12,6 +13,7 @@ export default function AccountSync() {
   const { isLoaded, isSignedIn, userId, sessionId, getToken } = useAuth();
 
   const [syncError, setSyncError] = useState<SyncError | null>(null);
+  const [dismissedError, setDismissedError] = useState<SyncError | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
@@ -86,25 +88,54 @@ export default function AccountSync() {
     !isLoaded ||
     !isSignedIn ||
     !sessionId ||
-    syncError?.sessionId !== sessionId
+    syncError?.sessionId !== sessionId ||
+    dismissedError === syncError
   ) {
     return null;
   }
 
   return (
-    <div className="bg-background px-4 pt-4 sm:px-6 lg:px-8">
-      <div
-        role="alert"
-        className="border-border bg-surface mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3"
-      >
-        <p className="text-muted text-sm">{syncError.message}</p>
+    <div
+      role="alert"
+      className="border-border bg-background fixed top-4 right-4 left-4 z-40 mx-auto max-w-sm rounded-2xl border p-4 shadow-lg sm:left-auto sm:mx-0"
+    >
+      <div className="flex items-start gap-3">
+        <div
+          aria-hidden="true"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-700"
+        >
+          <FiAlertCircle className="h-4 w-4" />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <p className="text-primary text-sm font-semibold">
+            Account connection interrupted
+          </p>
+
+          <p className="text-muted mt-1 text-xs leading-relaxed">
+            {syncError.message}
+          </p>
+
+          <button
+            type="button"
+            onClick={() => {
+              setDismissedError(null);
+              setRetryCount((count) => count + 1);
+            }}
+            className="border-border text-primary focus-visible:outline-primary hover:bg-surface mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            <FiRefreshCw aria-hidden="true" className="h-3.5 w-3.5" />
+            Try again
+          </button>
+        </div>
 
         <button
           type="button"
-          onClick={() => setRetryCount((count) => count + 1)}
-          className="text-primary focus-visible:outline-primary rounded-full px-4 py-2 text-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2"
+          aria-label="Dismiss account connection notice"
+          onClick={() => setDismissedError(syncError)}
+          className="text-muted focus-visible:outline-primary hover:bg-surface hover:text-primary flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2"
         >
-          Try again
+          <FiX aria-hidden="true" className="h-4 w-4" />
         </button>
       </div>
     </div>

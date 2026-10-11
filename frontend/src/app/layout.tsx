@@ -8,6 +8,7 @@ import AccountSync from "./component/AccountSync";
 import SavedJobsProvider, {
   SavedJobsNotice,
 } from "./component/SavedJobsProvider";
+import ApplicationsProvider from "./component/ApplicationsProvider";
 
 const geist = Geist({
   subsets: ["latin"],
@@ -67,14 +68,18 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           }}
         >
           <SavedJobsProvider>
-            <Navbar />
+            <SavedJobsProvider>
+              <ApplicationsProvider>
+                <Navbar />
 
-            <AccountSync />
-            <SavedJobsNotice />
+                <AccountSync />
+                <SavedJobsNotice />
 
-            <main className="flex-1">{children}</main>
+                <main className="flex-1">{children}</main>
 
-            <Footer />
+                <Footer />
+              </ApplicationsProvider>
+            </SavedJobsProvider>
           </SavedJobsProvider>
         </ClerkProvider>
       </body>

@@ -3,6 +3,7 @@ import cors from "cors";
 import { router } from "./routes/jobs.routes.js";
 import { createUsersRouter } from "./routes/users.routes.js";
 import { createSavedJobsRouter } from "./routes/saved-jobs.routes.js";
+import { createApplicationsRouter } from "./routes/applications.routes.js";
 
 const app = express();
 
@@ -16,5 +17,6 @@ app.use(express.json());
 app.use("/api", router);
 app.use("/api/users", createUsersRouter(frontendOrigin));
 app.use("/api/saved-jobs", createSavedJobsRouter(frontendOrigin));
+app.use("/api/applications", createApplicationsRouter(frontendOrigin));
 
 export default app;
