@@ -43,6 +43,13 @@
       "when": 1791811017980,
       "tag": "0005_smart-match-guards",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791829334268,
+      "tag": "0006_smart-match-cost-controls",
+      "breakpoints": true
     }
   ]
 }

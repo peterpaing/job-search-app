@@ -7,12 +7,10 @@ import {
   smartMatchCache,
   smartMatchLocks,
   smartMatchProfiles,
-  smartMatchUsage,
 } from "../db/smart-match.schema.js";
 import { getOrCreateUser } from "./users.service.js";
 import {
   AI_MODEL,
-  RESERVATION_CENTS,
   SmartMatchError,
   cacheKey,
   extractedProfileSchema,
@@ -32,12 +30,21 @@ import {
   jobAnswerSchema,
   toPublicJobAnswer,
 } from "./smart-match.scope.js";
+import { reserveBudget, settleBudget, usageFor } from "./smart-match.budget.js";
+import {
+  MAX_OUTPUT_TOKENS,
+  readTokenUsage,
+  reservationFor,
+  type TokenUsage,
+} from "./smart-match.costs.js";
 
 const responseSchema = z.object({
   status: z.string(),
+
   output: z.array(
     z.object({
       type: z.string(),
+
       content: z
         .array(
           z.object({
@@ -53,27 +60,33 @@ const responseSchema = z.object({
 const profileJsonSchema = {
   type: "object",
   additionalProperties: false,
+
   properties: {
     skills: {
       type: "array",
       items: { type: "string" },
     },
+
     roles: {
       type: "array",
       items: { type: "string" },
     },
+
     experience: {
       type: "string",
       enum: ["not-specified", "junior", "mid", "senior"],
     },
+
     location: {
       type: "string",
     },
+
     workMode: {
       type: "string",
       enum: ["any", "remote", "hybrid", "on-site"],
     },
   },
+
   required: ["skills", "roles", "experience", "location", "workMode"],
 };
 
@@ -90,37 +103,6 @@ const instructions = [
   "Use concise plain text, not HTML.",
 ].join(" ");
 
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-async function usageFor(userId: string) {
-  const config = getSmartMatchConfig();
-
-  const [usage] = await db
-    .select()
-    .from(smartMatchUsage)
-    .where(
-      and(
-        eq(smartMatchUsage.scope, `user:${userId}`),
-        eq(smartMatchUsage.day, today()),
-      ),
-    )
-    .limit(1);
-
-  const used = usage?.requests ?? 0;
-  const reset = new Date();
-
-  reset.setUTCHours(24, 0, 0, 0);
-
-  return {
-    used,
-    limit: config.userDailyLimit,
-    remaining: Math.max(0, config.userDailyLimit - used),
-    resetsAt: reset.toISOString(),
-  };
-}
-
 export async function getSmartMatchState(clerkUserId: string) {
   const user = await getOrCreateUser(clerkUserId);
 
@@ -132,6 +114,7 @@ export async function getSmartMatchState(clerkUserId: string) {
 
   return {
     profile: record ? profileSchema.parse(record.profile) : null,
+
     usage: await usageFor(user.id),
   };
 }
@@ -142,14 +125,12 @@ export async function storeSmartMatchProfile(
 ) {
   const user = await getOrCreateUser(clerkUserId);
 
-  const result = await db.execute(
-    sql`
-      SELECT smart_match_store_profile(
-        ${user.id}::uuid,
-        ${profile === null ? null : JSON.stringify(profile)}::jsonb
-      ) AS stored
-    `,
-  );
+  const result = await db.execute(sql`
+    SELECT smart_match_store_profile(
+      ${user.id}::uuid,
+      ${profile === null ? null : JSON.stringify(profile)}::jsonb
+    ) AS stored
+  `);
 
   const rows = z.array(z.object({ stored: z.boolean() })).parse(result.rows);
 
@@ -160,6 +141,7 @@ export async function storeSmartMatchProfile(
     );
   }
 
+  // Deleting a profile does not reset usage or spending records.
   return getSmartMatchState(clerkUserId);
 }
 
@@ -199,10 +181,12 @@ export async function getSmartMatchJobs(clerkUserId: string) {
         url: match.job.url,
         postedAt: match.job.postedAt,
       },
+
       matchedSkills: match.matchedSkills,
       strength: match.strength,
       workMode: match.workMode,
     })),
+
     searched: records.length,
   };
 }
@@ -260,74 +244,62 @@ async function generate<T>(
     throw new SmartMatchError(413, "This request is too large.");
   }
 
+  const body = {
+    model: AI_MODEL,
+    store: false,
+
+    instructions:
+      kind === "answer"
+        ? `${instructions}\n\n${JOB_QUESTION_INSTRUCTIONS}`
+        : instructions,
+
+    input: inputText,
+
+    max_output_tokens: MAX_OUTPUT_TOKENS,
+
+    text: {
+      format: {
+        type: "json_schema",
+
+        name: kind === "extract" ? "developer_profile" : "scoped_job_answer",
+
+        strict: true,
+        schema: jsonSchema,
+      },
+    },
+  };
+
   const leaseId = randomUUID();
 
-  const reservation = await db.execute(
-    sql`
-      SELECT smart_match_reserve(
-        ${userId}::uuid,
-        ${leaseId}::uuid,
-        ${config.userDailyLimit}::integer,
-        ${config.dailyBudgetCents}::integer,
-        ${RESERVATION_CENTS}::integer
-      ) AS result
-    `,
-  );
+  // All allowances are checked atomically before contacting OpenAI.
+  await reserveBudget(userId, leaseId, kind, reservationFor(body));
 
-  const rows = z
-    .array(z.object({ result: z.string() }))
-    .parse(reservation.rows);
-
-  const reservationResult = rows[0]?.result;
-
-  if (reservationResult !== "ok") {
-    const messages: Record<string, string> = {
-      busy: "You already have an AI request running. Please wait.",
-      user_limit: "You’ve reached your daily AI limit. Try again tomorrow.",
-      budget_limit:
-        "AI has reached today’s service budget. Try again tomorrow.",
-      disabled: "AI is temporarily unavailable.",
-    };
-
-    throw new SmartMatchError(
-      reservationResult === "busy"
-        ? 409
-        : reservationResult === "disabled"
-          ? 503
-          : 429,
-      messages[reservationResult ?? ""] ?? "AI is temporarily unavailable.",
-    );
-  }
+  let reportedUsage: TokenUsage | null = null;
+  let settled = false;
 
   try {
-    // No automatic retries: each new attempt must reserve usage.
+    // No automatic AI retries.
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
+
       headers: {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+
         "Content-Type": "application/json",
       },
+
       signal: AbortSignal.timeout(30_000),
-      body: JSON.stringify({
-        model: AI_MODEL,
-        store: false,
-        instructions:
-          kind === "answer"
-            ? `${instructions}\n\n${JOB_QUESTION_INSTRUCTIONS}`
-            : instructions,
-        input: inputText,
-        max_output_tokens: 1200,
-        text: {
-          format: {
-            type: "json_schema",
-            name:
-              kind === "extract" ? "developer_profile" : "scoped_job_answer",
-            strict: true,
-            schema: jsonSchema,
-          },
-        },
-      }),
+      body: JSON.stringify(body),
     });
+
+    const raw: unknown = await response.json();
+
+    reportedUsage = readTokenUsage(raw);
+
+    // Track reported usage even for incomplete, refused,
+    // or invalid answers.
+    await settleBudget(leaseId, reportedUsage);
+    settled = true;
 
     if (!response.ok) {
       throw new SmartMatchError(
@@ -336,7 +308,7 @@ async function generate<T>(
       );
     }
 
-    const output = responseSchema.parse(await response.json());
+    const output = responseSchema.parse(raw);
 
     if (output.status !== "completed") {
       throw new SmartMatchError(
@@ -362,29 +334,32 @@ async function generate<T>(
     const value = validator.parse(JSON.parse(text) as unknown);
 
     // Only the active lease holder can store a result.
-    await db.execute(
-      sql`
-        INSERT INTO smart_match_cache (
-          user_id, key, kind, payload, expires_at
-        )
-        SELECT
-          ${userId}::uuid,
-          ${key},
-          ${kind},
-          ${JSON.stringify(value)}::jsonb,
-          now() + interval '24 hours'
-        WHERE EXISTS (
-          SELECT 1 FROM smart_match_locks
-          WHERE user_id = ${userId}::uuid
-            AND lease_id = ${leaseId}::uuid
-            AND expires_at > now()
-        )
-        ON CONFLICT (user_id, key) DO UPDATE SET
-          kind = EXCLUDED.kind,
-          payload = EXCLUDED.payload,
-          expires_at = EXCLUDED.expires_at
-      `,
-    );
+    await db.execute(sql`
+      INSERT INTO smart_match_cache (
+        user_id,
+        key,
+        kind,
+        payload,
+        expires_at
+      )
+      SELECT
+        ${userId}::uuid,
+        ${key},
+        ${kind},
+        ${JSON.stringify(value)}::jsonb,
+        now() + interval '24 hours'
+      WHERE EXISTS (
+        SELECT 1
+        FROM smart_match_locks
+        WHERE user_id = ${userId}::uuid
+          AND lease_id = ${leaseId}::uuid
+          AND expires_at > now()
+      )
+      ON CONFLICT (user_id, key) DO UPDATE SET
+        kind = EXCLUDED.kind,
+        payload = EXCLUDED.payload,
+        expires_at = EXCLUDED.expires_at
+    `);
 
     return {
       value,
@@ -401,15 +376,29 @@ async function generate<T>(
       "AI couldn’t complete this request. Your saved profile is unchanged.",
     );
   } finally {
-    // Failed requests retain their reservation to prevent retry abuse.
-    await db
-      .delete(smartMatchLocks)
-      .where(
-        and(
-          eq(smartMatchLocks.userId, userId),
-          eq(smartMatchLocks.leaseId, leaseId),
-        ),
+    try {
+      if (!settled) {
+        await settleBudget(leaseId, reportedUsage);
+      }
+    } catch {
+      // Keep the reservation if accounting is unavailable.
+      console.error("[smartmatch-accounting] Settlement needs reconciliation.");
+    }
+
+    try {
+      await db
+        .delete(smartMatchLocks)
+        .where(
+          and(
+            eq(smartMatchLocks.userId, userId),
+            eq(smartMatchLocks.leaseId, leaseId),
+          ),
+        );
+    } catch {
+      console.error(
+        "[smartmatch-accounting] Lease cleanup failed; it will expire.",
       );
+    }
   }
 }
 
@@ -421,8 +410,11 @@ export async function extractSmartMatchProfile(
 
   const result = await generate(
     user.id,
+
     cacheKey(user.id, "extract", resumeText),
+
     "extract",
+
     {
       task:
         "Extract up to 20 explicitly stated developer skills and up to 5 explicitly stated role titles. " +
@@ -430,8 +422,10 @@ export async function extractSmartMatchProfile(
         "Do not invent missing skills. Use not-specified for unclear experience, " +
         "an empty location when unknown, and any for unspecified work preferences. " +
         "This is a draft the user must review.",
+
       resumeText,
     },
+
     profileJsonSchema,
     extractedProfileSchema,
   );
@@ -474,7 +468,7 @@ export async function answerSmartMatchQuestion(
 
   const normalizedQuestion = normalizeQuestion(question);
 
-  // Obvious generic coding questions are blocked without an AI call.
+  // Obvious generic coding questions use no AI allowance.
   if (isClearlyGenericCodingQuestion(normalizedQuestion)) {
     return {
       answer: OUT_OF_SCOPE_MESSAGE,
@@ -488,13 +482,17 @@ export async function answerSmartMatchQuestion(
     id: job.id,
     title: job.title.slice(0, 200),
     company: job.company.slice(0, 200),
+
     location: job.location?.slice(0, 200) ?? "",
+
     tags: job.tags.slice(0, 30).map((tag) => tag.slice(0, 80)),
+
     description: plainText(job.description ?? "").slice(0, 12_000),
   };
 
   const result = await generate(
     user.id,
+
     cacheKey(
       user.id,
       "answer",
@@ -505,17 +503,21 @@ export async function answerSmartMatchQuestion(
       job.updatedAt,
       normalizedQuestion,
     ),
+
     "answer",
+
     {
       task:
         "Apply the scope policy to this independent question. " +
         "If it is out of scope, return out_of_scope with an empty answer. " +
         "Otherwise, answer only about the selected listing and profile. " +
         "There is no previous conversation. Keep the answer under 250 words.",
+
       profile,
       listing,
       question: normalizedQuestion,
     },
+
     jobAnswerJsonSchema,
     jobAnswerSchema,
   );
