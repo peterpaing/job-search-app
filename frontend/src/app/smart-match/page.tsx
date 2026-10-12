@@ -16,6 +16,9 @@ import JobCard, { type Job } from "../component/JobCard";
 import TagInput, { mergeTags } from "../component/TagInput";
 import SmartMatchChat from "../component/SmartMatchChat";
 import PremiumPreview from "../component/PremiumPreview";
+import SmartMatchUsage, {
+  type SmartMatchUsageData,
+} from "../component/SmartMatchUsage";
 
 type Profile = {
   skills: string[];
@@ -23,13 +26,6 @@ type Profile = {
   experience: "not-specified" | "junior" | "mid" | "senior";
   location: string;
   workMode: "any" | "remote" | "hybrid" | "on-site";
-};
-
-type Usage = {
-  used: number;
-  limit: number;
-  remaining: number;
-  resetsAt: string;
 };
 
 type Access = {
@@ -40,7 +36,7 @@ type Access = {
 
 type ProfileState = {
   profile: Profile | null;
-  usage: Usage;
+  usage: SmartMatchUsageData;
 };
 
 type Match = {
@@ -58,14 +54,14 @@ type MatchesResponse = {
 type ExtractionResponse = {
   draft: Profile;
   cached: boolean;
-  usage: Usage;
+  usage: SmartMatchUsageData;
 };
 
 type AnswerResponse = {
   answer: string;
   cached: boolean;
   outOfScope?: boolean;
-  usage: Usage;
+  usage: SmartMatchUsageData;
 };
 
 const emptyProfile: Profile = {
@@ -132,7 +128,7 @@ function SmartMatchWorkspace({
 
   const [resumeText, setResumeText] = useState("");
   const [consent, setConsent] = useState(false);
-  const [usage, setUsage] = useState<Usage | null>(null);
+  const [usage, setUsage] = useState<SmartMatchUsageData | null>(null);
 
   const [view, setView] = useState<"matches" | "profile">("profile");
   const [matches, setMatches] = useState<Match[]>([]);
@@ -151,15 +147,16 @@ function SmartMatchWorkspace({
 
   useEffect(() => {
     mounted.current = true;
+    const activeControllers = controllers.current;
 
     return () => {
       mounted.current = false;
 
-      for (const controller of controllers.current) {
+      for (const controller of activeControllers) {
         controller.abort();
       }
 
-      controllers.current.clear();
+      activeControllers.clear();
     };
   }, []);
 
@@ -201,12 +198,15 @@ function SmartMatchWorkspace({
           method,
           cache: "no-store",
           signal: controller.signal,
+
           headers: {
             Authorization: `Bearer ${token}`,
+
             ...(body !== undefined
               ? { "Content-Type": "application/json" }
               : {}),
           },
+
           ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
         });
 
@@ -358,6 +358,7 @@ function SmartMatchWorkspace({
 
     try {
       const result = await request<MatchesResponse>("/matches");
+
       setMatches(result.matches);
       setSearched(result.searched);
     } finally {
@@ -365,6 +366,14 @@ function SmartMatchWorkspace({
         setMatchesLoading(false);
       }
     }
+  }
+
+  async function refreshUsage() {
+    const state = await request<ProfileState>("/profile");
+
+    // Do not overwrite unsaved profile changes.
+    setUsage(state.usage);
+    setNotice("Usage updated.");
   }
 
   function saveProfile() {
@@ -409,6 +418,7 @@ function SmartMatchWorkspace({
       setUsage(result.usage);
       setResumeText("");
       setConsent(false);
+
       setNotice(
         "Draft ready. Review your skills and preferences, then save your profile.",
       );
@@ -480,6 +490,7 @@ function SmartMatchWorkspace({
       setSelectedJob(null);
       setView("profile");
       deleteDialog.current?.close();
+
       setNotice("Your SmartMatch profile and cached answers were deleted.");
     });
   }
@@ -542,15 +553,11 @@ function SmartMatchWorkspace({
         </div>
 
         {usage && (
-          <p
-            role="status"
-            className="border-border bg-surface text-muted rounded-full border px-4 py-2.5 text-xs"
-          >
-            <span className="text-primary font-semibold">
-              {usage.remaining}
-            </span>{" "}
-            / {usage.limit} AI generations left today
-          </p>
+          <SmartMatchUsage
+            usage={usage}
+            refreshDisabled={busy}
+            onRefresh={() => void run(refreshUsage)}
+          />
         )}
       </div>
 
@@ -1067,8 +1074,8 @@ function SmartMatchWorkspace({
           className="text-muted mt-4 text-center text-sm leading-relaxed"
         >
           This deletes your saved developer profile and cached answers. Saved
-          jobs and applications stay unchanged. Usage counts are retained to
-          enforce daily limits.
+          jobs and applications stay unchanged. Usage and accounting records are
+          retained to enforce your allowances.
         </p>
 
         <div className="mt-6 grid grid-cols-2 gap-3">
