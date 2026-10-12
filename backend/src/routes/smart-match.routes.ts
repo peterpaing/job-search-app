@@ -1,0 +1,223 @@
+import { clerkMiddleware, getAuth } from "@clerk/express";
+import { Router, type ErrorRequestHandler } from "express";
+import { z } from "zod";
+import {
+  SmartMatchError,
+  getSmartMatchConfig,
+  profileSchema,
+} from "../services/smart-match.logic.js";
+
+const extractSchema = z
+  .object({
+    resumeText: z.string().trim().min(40).max(16_000),
+    consent: z.literal(true),
+  })
+  .strict();
+
+const questionSchema = z
+  .object({
+    jobId: z.string().trim().min(1).max(512),
+    question: z.string().trim().min(3).max(600),
+  })
+  .strict();
+
+export function createSmartMatchRouter(frontendOrigin: string) {
+  const router = Router();
+
+  router.use((_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  });
+
+  router.use(
+    clerkMiddleware({
+      authorizedParties: [frontendOrigin],
+    }),
+  );
+
+  router.use((req, res, next) => {
+    try {
+      const auth = getAuth(req, {
+        acceptsToken: "session_token",
+        treatPendingAsSignedOut: true,
+      });
+
+      if (!auth.isAuthenticated || !auth.userId) {
+        res.status(401).json({ message: "Sign in to use SmartMatch." });
+        return;
+      }
+
+      res.locals.clerkUserId = auth.userId;
+      next();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/access", (_req, res, next) => {
+    try {
+      const config = getSmartMatchConfig();
+
+      res.json({
+        premium: config.premiumUsers.has(res.locals.clerkUserId as string),
+        aiEnabled: config.enabled,
+        dailyLimit: config.userDailyLimit,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Every private endpoint checks premium on the server.
+  router.use((_req, res, next) => {
+    try {
+      const config = getSmartMatchConfig();
+
+      if (!config.premiumUsers.has(res.locals.clerkUserId as string)) {
+        res.status(403).json({
+          message:
+            "SmartMatch is a StackWing Pro feature. Paid plans are coming soon.",
+        });
+        return;
+      }
+
+      next();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/profile", async (_req, res, next) => {
+    try {
+      const service = await import("../services/smart-match.service.js");
+
+      res.json(
+        await service.getSmartMatchState(res.locals.clerkUserId as string),
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.put("/profile", async (req, res, next) => {
+    const parsed = profileSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        message:
+          "Add 1–20 skills, no more than 5 roles, and valid preferences.",
+      });
+      return;
+    }
+
+    try {
+      const service = await import("../services/smart-match.service.js");
+
+      res.json(
+        await service.storeSmartMatchProfile(
+          res.locals.clerkUserId as string,
+          parsed.data,
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.delete("/profile", async (_req, res, next) => {
+    try {
+      const service = await import("../services/smart-match.service.js");
+
+      res.json(
+        await service.storeSmartMatchProfile(
+          res.locals.clerkUserId as string,
+          null,
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/matches", async (_req, res, next) => {
+    try {
+      const service = await import("../services/smart-match.service.js");
+
+      res.json(
+        await service.getSmartMatchJobs(res.locals.clerkUserId as string),
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/extract", async (req, res, next) => {
+    const parsed = extractSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        message:
+          "Provide 40–16,000 characters of resume text and confirm consent.",
+      });
+      return;
+    }
+
+    try {
+      const service = await import("../services/smart-match.service.js");
+
+      res.json(
+        await service.extractSmartMatchProfile(
+          res.locals.clerkUserId as string,
+          parsed.data.resumeText,
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/ask", async (req, res, next) => {
+    const parsed = questionSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        message: "Choose a job and enter a question of 3–600 characters.",
+      });
+      return;
+    }
+
+    try {
+      const service = await import("../services/smart-match.service.js");
+
+      res.json(
+        await service.answerSmartMatchQuestion(
+          res.locals.clerkUserId as string,
+          parsed.data.jobId,
+          parsed.data.question,
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  const handleError: ErrorRequestHandler = (error, _req, res, next) => {
+    if (res.headersSent) {
+      next(error);
+      return;
+    }
+
+    if (error instanceof SmartMatchError) {
+      res.status(error.status).json({ message: error.message });
+      return;
+    }
+
+    res.status(500).json({
+      message: "SmartMatch couldn’t load. Please try again.",
+    });
+  };
+
+  router.use(handleError);
+
+  return router;
+}
