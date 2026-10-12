@@ -1,4 +1,5 @@
 import { remoteOkResponseSchema } from "../schemas/remote-ok.schema.js";
+import { sourceDescription } from "./job-description.logic.js";
 
 export async function getRemoteOkJobs() {
   const response = await fetch("https://remoteok.com/api", {
@@ -30,5 +31,7 @@ export async function getRemoteOkJobs() {
       tags: job.tags ?? [],
       url: job.url,
       postedAt: job.date,
+
+      ...sourceDescription(job.description),
     }));
 }

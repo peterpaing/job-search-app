@@ -10,6 +10,9 @@ export const devGlobalJobSchema = z.object({
   jobType: z.string().nullish(),
   postedAt: z.string(),
   url: z.string().url(),
+
+  // Collect only when the API actually supplies this field.
+  description: z.string().nullish().catch(null),
 });
 
 export const devGlobalJobsResponseSchema = z.object({

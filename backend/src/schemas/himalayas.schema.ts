@@ -15,6 +15,9 @@ export const himalayasJobSchema = z.object({
   pubDate: z.number(),
 
   expiryDate: z.number().finite().positive().nullish(),
+
+  // Optional content must not invalidate an otherwise usable job.
+  description: z.string().nullish().catch(null),
 });
 
 export const himalayasResponseSchema = z.object({
