@@ -16,9 +16,9 @@ concurrency:
 
 jobs:
   refresh:
-    name: Import jobs and clean up old posts
+    name: Import, verify availability, and clean up jobs
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     defaults:
       run:
@@ -41,11 +41,24 @@ jobs:
         run: npm ci
 
       - name: Import jobs into Neon
+        id: import
+        continue-on-error: true
         run: npm run jobs:import
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-      - name: Delete jobs stored more than 30 days ago
+      - name: Check stored job availability
+        run: npx tsx src/scripts/check-jobs.ts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Delete unreferenced jobs closed over 30 days ago
         run: npm run jobs:cleanup
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Report import failure
+        if: ${{ always() && steps.import.outcome == 'failure' }}
+        run: |
+          echo "Import failed. Availability checks still ran against stored jobs."
+          exit 1
