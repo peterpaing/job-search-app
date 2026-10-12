@@ -9,6 +9,8 @@ export const remoteOkJobSchema = z.object({
   tags: z.array(z.string()).optional(),
   url: z.string().url(),
   date: z.string(),
+
+  description: z.string().nullish().catch(null),
 });
 
 export const remoteOkResponseSchema = z

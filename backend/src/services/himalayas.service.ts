@@ -1,4 +1,5 @@
 import { himalayasResponseSchema } from "../schemas/himalayas.schema.js";
+import { sourceDescription } from "./job-description.logic.js";
 
 export async function getHimalayasJobs() {
   const response = await fetch("https://himalayas.app/jobs/api?limit=20", {
@@ -35,6 +36,8 @@ export async function getHimalayasJobs() {
         employmentType: job.employmentType?.trim() || null,
         url: job.applicationLink,
         postedAt: new Date(job.pubDate * 1000).toISOString(),
+
+        ...sourceDescription(job.description),
 
         ...(expiry && Number.isFinite(expiry.getTime())
           ? { expiresAt: expiry.toISOString() }

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { jobs, type NewDatabaseJob } from "../db/schema.js";
+import { normalizeJobDescription } from "./job-description.logic.js";
 import { getJobs } from "./jobs.service.js";
 
 const BATCH_SIZE = 100;
@@ -16,6 +17,7 @@ export async function importJobs() {
   const now = new Date().toISOString();
 
   const uniqueJobs = new Map<string, NewDatabaseJob>();
+
   const sourceExpiries = new Map<string, SourceExpiry>();
 
   for (const job of fetchedJobs) {
@@ -32,10 +34,9 @@ export async function importJobs() {
       company: job.company,
       companyLogo: job.companyLogo,
 
-      description:
-        "description" in job && typeof job.description === "string"
-          ? job.description
-          : null,
+      description: normalizeJobDescription(
+        "description" in job ? job.description : null,
+      ),
 
       location: job.location,
 
@@ -84,14 +85,24 @@ export async function importJobs() {
           title: sql`excluded."title"`,
           company: sql`excluded."company"`,
           companyLogo: sql`excluded."company_logo"`,
-          description: sql`excluded."description"`,
+
+          description: sql`
+            COALESCE(
+              NULLIF(
+                BTRIM(excluded."description"),
+                ''
+              ),
+              ${jobs.description}
+            )
+          `,
+
           location: sql`excluded."location"`,
           country: sql`excluded."country"`,
           tags: sql`excluded."tags"`,
           url: sql`excluded."url"`,
           postedAt: sql`excluded."posted_at"`,
 
-          // A feed appearance is not proof that a job reopened.
+          // Importing a listing does not prove it reopened.
           isActive: sql`${jobs.isActive}`,
 
           lastSeenAt: sql`excluded."last_seen_at"`,
@@ -122,9 +133,6 @@ export async function importJobs() {
 
   return {
     fetched: fetchedJobs.length,
-
-    // Number of unique input jobs processed.
-    // The database guard may skip closed tombstones.
     processed: rows.length,
   };
 }

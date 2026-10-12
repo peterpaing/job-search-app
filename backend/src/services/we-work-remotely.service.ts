@@ -1,5 +1,6 @@
 import Parser from "rss-parser";
 import { weWorkRemotelyResponseSchema } from "../schemas/we-work-remotely.schema.js";
+import { sourceDescription } from "./job-description.logic.js";
 
 const parser = new Parser({
   customFields: {
@@ -27,7 +28,6 @@ export async function getWeWorkRemotelyJobs() {
   const { items } = weWorkRemotelyResponseSchema.parse(payload);
 
   return items.map((job) => {
-    // Feed titles use "Company: Job title".
     const separatorIndex = job.title.indexOf(": ");
 
     const company =
@@ -50,6 +50,8 @@ export async function getWeWorkRemotelyJobs() {
       tags: job.categories ?? [],
       url: job.link,
       postedAt: new Date(job.pubDate).toISOString(),
+
+      ...sourceDescription(job["content:encoded"], job.content),
     };
   });
 }

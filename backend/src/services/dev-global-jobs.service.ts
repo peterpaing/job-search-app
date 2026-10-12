@@ -1,4 +1,5 @@
 import { devGlobalJobsResponseSchema } from "../schemas/dev-global-jobs.schema.js";
+import { sourceDescription } from "./job-description.logic.js";
 
 export async function getDevGlobalJobs() {
   const response = await fetch(
@@ -39,6 +40,8 @@ export async function getDevGlobalJobs() {
         employmentType: job.jobType?.trim() || null,
         url: job.url,
         postedAt: job.postedAt,
+
+        ...sourceDescription(job.description),
       };
     });
 }
