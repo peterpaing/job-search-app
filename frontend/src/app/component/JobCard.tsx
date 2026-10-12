@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
+import { FiMessageCircle } from "react-icons/fi";
 import SaveJobButton from "./SaveJobButton";
 import { useApplicationVisit } from "./ApplicationsProvider";
 
@@ -17,6 +18,19 @@ export type Job = {
   tags: string[];
   url: string;
   postedAt: string;
+};
+
+export type JobMatchDetails = {
+  strength: "strong" | "partial" | "related";
+  workMode: "remote" | "hybrid" | "on-site" | "unknown";
+  matchedSkills: string[];
+};
+
+type JobCardProps = {
+  job: Job;
+  matchDetails?: JobMatchDetails;
+  onAsk?: (trigger: HTMLButtonElement) => void;
+  askDisabled?: boolean;
 };
 
 const companyColors = [
@@ -34,6 +48,7 @@ function getCompanyInitial(company: string) {
 
 function getCompanyColors(initial: string) {
   const characterCode = initial.codePointAt(0) ?? 0;
+
   const colorIndex = /^[A-Z]$/.test(initial)
     ? (characterCode - 65) % companyColors.length
     : characterCode % companyColors.length;
@@ -75,14 +90,49 @@ function CompanyLogo({
   );
 }
 
-export default function JobCard({ job }: { job: Job }) {
+export default function JobCard({
+  job,
+  matchDetails,
+  onAsk,
+  askDisabled = false,
+}: JobCardProps) {
   const recordVisit = useApplicationVisit();
   const postedDate = new Date(job.postedAt);
   const hasValidDate = !Number.isNaN(postedDate.getTime());
   const logoUrl = job.companyLogo?.trim() || null;
 
   return (
-    <article className="border-border bg-background flex min-h-[250px] flex-col rounded-2xl border p-5">
+    <article
+      className={`border-border bg-background flex min-h-[250px] flex-col rounded-2xl border p-5 ${
+        matchDetails ? "h-full" : ""
+      }`}
+    >
+      {matchDetails && (
+        <div className="border-border mb-4 flex flex-wrap items-center gap-2 border-b pb-4">
+          <span
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+              matchDetails.strength === "strong"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : matchDetails.strength === "partial"
+                  ? "border-amber-200 bg-amber-50 text-amber-800"
+                  : "border-blue-200 bg-blue-50 text-blue-800"
+            }`}
+          >
+            {matchDetails.strength === "strong"
+              ? "Strong skill overlap"
+              : matchDetails.strength === "partial"
+                ? "Partial skill overlap"
+                : "Related role · skills unconfirmed"}
+          </span>
+
+          {matchDetails.workMode === "unknown" && (
+            <span className="border-border bg-surface text-muted rounded-full border px-3 py-1.5 text-xs">
+              Work mode unconfirmed
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <CompanyLogo
@@ -152,11 +202,52 @@ export default function JobCard({ job }: { job: Job }) {
         ))}
       </div>
 
-      <div className="mt-auto flex items-start justify-between gap-3 pt-4">
+      {matchDetails && (
+        <div className="border-border mt-5 border-t pt-4">
+          <p className="text-primary text-xs font-medium">
+            Your matching skills
+          </p>
+
+          {matchDetails.matchedSkills.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {matchDetails.matchedSkills.map((skill) => (
+                <span
+                  key={skill}
+                  className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs text-emerald-800"
+                >
+                  {skill}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-muted mt-2 text-xs leading-relaxed">
+              The role matches your preference, but the listing does not confirm
+              your technical skills.
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="mt-auto flex items-start justify-between gap-3 pt-5">
         <p className="text-muted pt-2 text-xs">Source: {job.source}</p>
 
         <SaveJobButton job={job} />
       </div>
+
+      {onAsk && (
+        <div className="border-border mt-4 border-t pt-4">
+          <button
+            type="button"
+            disabled={askDisabled}
+            aria-label={`Ask about ${job.title} at ${job.company}`}
+            onClick={(event) => onAsk(event.currentTarget)}
+            className="bg-primary text-background focus-visible:outline-primary inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-medium transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <FiMessageCircle aria-hidden="true" className="h-4 w-4" />
+            Ask about this job
+          </button>
+        </div>
+      )}
     </article>
   );
 }

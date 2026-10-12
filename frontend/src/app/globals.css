@@ -17,14 +17,13 @@ body {
   color: var(--color-primary);
 }
 
-/* Fixed-height notes with a scrollbar matching the neutral theme. */
+/* Neutral scrollbars for notes and the chat panel. */
 .application-notes {
   scrollbar-width: thin;
   scrollbar-color: #a3a3a3 transparent;
   scrollbar-gutter: stable;
 }
 
-/* Use custom scrollbar styling in Chrome and Edge. */
 @supports selector(::-webkit-scrollbar) {
   .application-notes {
     scrollbar-width: auto;
@@ -62,6 +61,7 @@ body {
     background: transparent;
   }
 }
+
 @keyframes intro-hero-reveal {
   from {
     opacity: 0;
@@ -74,8 +74,38 @@ body {
   }
 }
 
+.smartmatch-thinking {
+  color: var(--color-muted);
+}
+
+@keyframes smartmatch-thinking-shimmer {
+  from {
+    background-position: 200% center;
+  }
+
+  to {
+    background-position: -200% center;
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .intro-hero-reveal {
     animation: intro-hero-reveal 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .smartmatch-thinking {
+    background-image: linear-gradient(
+      100deg,
+      #8a8a8a 0%,
+      #8a8a8a 35%,
+      #171717 50%,
+      #8a8a8a 65%,
+      #8a8a8a 100%
+    );
+    background-size: 200% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: smartmatch-thinking-shimmer 2s linear infinite;
   }
 }
