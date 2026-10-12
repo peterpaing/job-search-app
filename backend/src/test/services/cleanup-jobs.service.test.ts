@@ -48,52 +48,65 @@ describe("cleanupJobs", () => {
   it("deletes from the jobs table", async () => {
     await cleanupJobs();
 
-    expect(dbMocks.delete).toHaveBeenCalledTimes(1);
     expect(dbMocks.delete).toHaveBeenCalledWith(jobs);
-    expect(dbMocks.where).toHaveBeenCalledTimes(1);
     expect(dbMocks.returning).toHaveBeenCalledWith({
       id: jobs.id,
     });
   });
 
-  it("deletes old jobs only when nobody has saved them", async () => {
+  it("requires inactive status and 30 days since closure", async () => {
     await cleanupJobs();
 
     const condition = dbMocks.where.mock.calls[0]?.[0] as SQL;
     const query = dialect.sqlToQuery(condition);
     const normalizedSql = query.sql.replace(/\s+/g, " ").trim();
 
-    expect(normalizedSql).toContain('"jobs"."created_at" < $1');
+    expect(normalizedSql).toContain('"jobs"."is_active" = $1');
+    expect(normalizedSql).toContain("public.job_availability");
+    expect(normalizedSql).toContain('availability.job_id = "jobs"."id"');
+    expect(normalizedSql).toContain("availability.closed_at < $2::timestamptz");
 
-    expect(normalizedSql).toContain("NOT EXISTS");
-    expect(normalizedSql).toContain('FROM "saved_jobs"');
+    expect(normalizedSql).not.toContain('"jobs"."created_at"');
 
-    expect(normalizedSql).toContain('"saved_jobs"."job_id" = "jobs"."id"');
-
-    expect(query.params).toEqual([EXPECTED_CUTOFF]);
+    expect(query.params).toEqual([false, EXPECTED_CUTOFF]);
   });
 
-  it("returns the number of deleted jobs and the cutoff", async () => {
+  it("preserves jobs saved or tracked by any user", async () => {
+    await cleanupJobs();
+
+    const condition = dbMocks.where.mock.calls[0]?.[0] as SQL;
+    const query = dialect.sqlToQuery(condition);
+    const normalizedSql = query.sql.replace(/\s+/g, " ").trim();
+
+    expect(normalizedSql).toContain('FROM "saved_jobs"');
+    expect(normalizedSql).toContain('"saved_jobs"."job_id" = "jobs"."id"');
+
+    expect(normalizedSql).toContain('FROM "applications"');
+    expect(normalizedSql).toContain('"applications"."job_id" = "jobs"."id"');
+
+    expect(normalizedSql.match(/NOT EXISTS/g)).toHaveLength(2);
+  });
+
+  it("returns the deleted count and cutoff", async () => {
     dbMocks.returning.mockResolvedValueOnce([
       { id: "remote-ok-123" },
       { id: "himalayas-example" },
-      { id: "dev-global-jobs-456" },
     ]);
 
     await expect(cleanupJobs()).resolves.toEqual({
-      deleted: 3,
+      deleted: 2,
       cutoff: EXPECTED_CUTOFF,
     });
   });
 
-  it("returns zero when no jobs are old enough", async () => {
+  it("returns zero when no jobs qualify", async () => {
     await expect(cleanupJobs()).resolves.toEqual({
       deleted: 0,
       cutoff: EXPECTED_CUTOFF,
     });
   });
 
-  it("recalculates the cutoff using the current time", async () => {
+  it("recalculates the cutoff", async () => {
     vi.setSystemTime(new Date("2026-10-10T12:00:00.000Z"));
 
     await expect(cleanupJobs()).resolves.toEqual({
@@ -103,10 +116,8 @@ describe("cleanupJobs", () => {
   });
 
   it("propagates database errors", async () => {
-    const error = new Error("Database unavailable");
+    dbMocks.returning.mockRejectedValueOnce(new Error("Database unavailable"));
 
-    dbMocks.returning.mockRejectedValueOnce(error);
-
-    await expect(cleanupJobs()).rejects.toThrow(error);
+    await expect(cleanupJobs()).rejects.toThrow("Database unavailable");
   });
 });
