@@ -20,17 +20,25 @@ export async function getHimalayasJobs() {
 
   return jobs
     .filter((job) => devTitlePattern.test(job.title))
-    .map((job) => ({
-      id: `himalayas-${job.guid}`,
-      source: "Himalayas",
-      title: job.title,
-      company: job.companyName,
-      companyLogo: job.companyLogo?.trim() || null,
-      location: job.locationRestrictions?.join(", ") || null,
-      tags: job.categories ?? [],
-      seniority: job.seniority ?? [],
-      employmentType: job.employmentType?.trim() || null,
-      url: job.applicationLink,
-      postedAt: new Date(job.pubDate * 1000).toISOString(),
-    }));
+    .map((job) => {
+      const expiry = job.expiryDate ? new Date(job.expiryDate * 1000) : null;
+
+      return {
+        id: `himalayas-${job.guid}`,
+        source: "Himalayas",
+        title: job.title,
+        company: job.companyName,
+        companyLogo: job.companyLogo?.trim() || null,
+        location: job.locationRestrictions?.join(", ") || null,
+        tags: job.categories ?? [],
+        seniority: job.seniority ?? [],
+        employmentType: job.employmentType?.trim() || null,
+        url: job.applicationLink,
+        postedAt: new Date(job.pubDate * 1000).toISOString(),
+
+        ...(expiry && Number.isFinite(expiry.getTime())
+          ? { expiresAt: expiry.toISOString() }
+          : {}),
+      };
+    });
 }
