@@ -1,14 +1,12 @@
 "use client";
 
-import { SignInButton, useAuth, useClerk } from "@clerk/nextjs";
+import { useAuth, useClerk } from "@clerk/nextjs";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FaCrown } from "react-icons/fa";
 import {
   FiCheck,
   FiFileText,
-  FiLock,
-  FiMessageCircle,
   FiRefreshCw,
   FiTrash2,
   FiUpload,
@@ -17,6 +15,7 @@ import {
 import JobCard, { type Job } from "../component/JobCard";
 import TagInput, { mergeTags } from "../component/TagInput";
 import SmartMatchChat from "../component/SmartMatchChat";
+import PremiumPreview from "../component/PremiumPreview";
 
 type Profile = {
   skills: string[];
@@ -65,6 +64,7 @@ type ExtractionResponse = {
 type AnswerResponse = {
   answer: string;
   cached: boolean;
+  outOfScope?: boolean;
   usage: Usage;
 };
 
@@ -109,88 +109,6 @@ function LoadingPanel() {
   );
 }
 
-function PremiumPreview({ signedIn }: { signedIn: boolean }) {
-  return (
-    <div className="border-border overflow-hidden rounded-3xl border">
-      <div className="bg-primary text-background px-6 py-12 sm:px-10">
-        <span className="inline-flex items-center gap-2 rounded-full border border-white/20 px-3 py-1.5 text-xs font-medium">
-          <FaCrown aria-hidden="true" />
-          StackWing Pro
-        </span>
-
-        <h1 className="mt-6 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
-          Your next role, with more clarity.
-        </h1>
-
-        <p className="mt-4 max-w-xl text-sm leading-relaxed text-white/70">
-          Discover relevant jobs, understand your fit, and prepare your next
-          application with SmartMatch.
-        </p>
-      </div>
-
-      <div className="p-6 sm:p-10">
-        <div className="grid gap-5 sm:grid-cols-3">
-          {[
-            {
-              icon: FiFileText,
-              title: "Your developer profile",
-              description: "Review skills extracted from your resume.",
-            },
-            {
-              icon: FiZap,
-              title: "Relevant opportunities",
-              description: "Find jobs with matching skills and preferences.",
-            },
-            {
-              icon: FiMessageCircle,
-              title: "Answers with context",
-              description: "Ask about a listing and prepare your application.",
-            },
-          ].map(({ icon: Icon, title, description }) => (
-            <div key={title} className="bg-surface rounded-2xl p-5">
-              <Icon aria-hidden="true" className="text-primary h-5 w-5" />
-
-              <h2 className="text-primary mt-4 text-sm font-semibold">
-                {title}
-              </h2>
-
-              <p className="text-muted mt-2 text-sm leading-relaxed">
-                {description}
-              </p>
-            </div>
-          ))}
-        </div>
-
-        <div className="border-border mt-8 flex flex-wrap items-center justify-between gap-5 border-t pt-6">
-          <div>
-            <p className="text-primary inline-flex items-center gap-2 text-sm font-medium">
-              <FiLock aria-hidden="true" />
-
-              {signedIn ? "Premium access required" : "Sign in to check access"}
-            </p>
-
-            <p className="text-muted mt-2 text-sm">
-              Paid subscriptions are coming soon.
-            </p>
-          </div>
-
-          {signedIn ? (
-            <Link href="/" className={secondaryButtonClass}>
-              Explore jobs
-            </Link>
-          ) : (
-            <SignInButton mode="modal" forceRedirectUrl="/smart-match">
-              <button type="button" className={buttonClass}>
-                Sign in
-              </button>
-            </SignInButton>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SmartMatchWorkspace({
   userId,
   sessionId,
@@ -221,7 +139,6 @@ function SmartMatchWorkspace({
   const [matchesLoading, setMatchesLoading] = useState(false);
   const [searched, setSearched] = useState(0);
   const [strongOnly, setStrongOnly] = useState(false);
-
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
 
   const mounted = useRef(false);
@@ -538,7 +455,6 @@ function SmartMatchWorkspace({
       });
 
       setUsage(result.usage);
-
       return result;
     } finally {
       operation.current = false;
