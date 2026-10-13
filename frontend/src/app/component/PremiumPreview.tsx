@@ -46,32 +46,15 @@ const benefits = [
 ];
 
 const comparison = [
-  {
-    label: "Browse developer jobs",
-    free: true,
-    pro: true,
-  },
-  {
-    label: "Save jobs and track applications",
-    free: true,
-    pro: true,
-  },
-  {
-    label: "Resume skill extraction",
-    free: false,
-    pro: true,
-  },
-  {
-    label: "Personalised job recommendations",
-    free: false,
-    pro: true,
-  },
-  {
-    label: "Job-specific AI assistance",
-    free: false,
-    pro: true,
-  },
+  { label: "Browse developer jobs", free: true, pro: true },
+  { label: "Save jobs and track applications", free: true, pro: true },
+  { label: "Resume skill extraction", free: false, pro: true },
+  { label: "Personalised job recommendations", free: false, pro: true },
+  { label: "Job-specific AI assistance", free: false, pro: true },
 ];
+
+const upgradeClass =
+  "bg-primary text-background mt-7 inline-flex w-full items-center justify-center gap-2 rounded-full px-5 py-3.5 text-sm font-medium";
 
 function Included({ value }: { value: boolean }) {
   return (
@@ -81,7 +64,6 @@ function Included({ value }: { value: boolean }) {
       ) : (
         <FiMinus aria-hidden="true" className="text-muted h-4 w-4" />
       )}
-
       <span className="sr-only">{value ? "Included" : "Not included"}</span>
     </span>
   );
@@ -126,10 +108,8 @@ export default function PremiumPreview({ signedIn }: PremiumPreviewProps) {
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/5">
                     <Icon aria-hidden="true" className="h-4 w-4" />
                   </span>
-
                   <div>
                     <h2 className="text-sm font-medium">{title}</h2>
-
                     <p className="mt-1.5 text-xs leading-relaxed text-white/60">
                       {description}
                     </p>
@@ -147,16 +127,14 @@ export default function PremiumPreview({ signedIn }: PremiumPreviewProps) {
               <span className="bg-surface inline-flex h-10 w-10 items-center justify-center rounded-xl">
                 <FaCrown aria-hidden="true" className="h-4 w-4" />
               </span>
-
               <span className="border-border bg-surface text-muted rounded-full border px-3 py-1 text-xs font-medium">
-                Coming soon
+                Monthly plan
               </span>
             </div>
 
             <h2 id="pro-price-heading" className="mt-5 text-xl font-semibold">
               StackWing Pro
             </h2>
-
             <p className="text-muted mt-2 text-sm">
               Your skills deserve the right opportunity.
             </p>
@@ -165,12 +143,11 @@ export default function PremiumPreview({ signedIn }: PremiumPreviewProps) {
               <span className="text-6xl leading-none font-semibold tracking-tight">
                 $1.99
               </span>
-
               <span className="text-muted text-sm">/ month</span>
             </div>
 
             <p className="text-muted mt-3 text-xs">
-              Planned monthly price in USD.
+              Monthly price in USD. AI usage limits apply.
             </p>
 
             <div className="border-border my-6 border-t" />
@@ -192,39 +169,47 @@ export default function PremiumPreview({ signedIn }: PremiumPreviewProps) {
               ))}
             </ul>
 
-            <button
-              type="button"
-              disabled
-              aria-describedby="pro-payment-status"
-              className="bg-primary text-background mt-7 inline-flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-full px-5 py-3.5 text-sm font-medium"
-            >
-              <FiLock aria-hidden="true" className="h-4 w-4" />
-              Payments coming soon
-            </button>
+            {signedIn ? (
+              <Link
+                href="/billing"
+                aria-describedby="pro-payment-status"
+                className={upgradeClass}
+              >
+                Upgrade to Pro
+                <FiArrowRight aria-hidden="true" />
+              </Link>
+            ) : (
+              <SignInButton mode="modal" forceRedirectUrl="/billing">
+                <button
+                  type="button"
+                  aria-describedby="pro-payment-status"
+                  className={upgradeClass}
+                >
+                  Sign in to upgrade
+                  <FiArrowRight aria-hidden="true" />
+                </button>
+              </SignInButton>
+            )}
 
             <p
               id="pro-payment-status"
               className="text-muted mt-3 text-center text-xs leading-relaxed"
             >
-              Paid subscriptions are coming soon.
+              Renews monthly until cancelled.
             </p>
-
             <p className="text-muted mt-1 text-center text-xs">
-              No checkout or payment is available yet.
+              Cancel future renewals from your billing page.
             </p>
 
             <div className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-3">
-              {!signedIn && (
-                <SignInButton mode="modal" forceRedirectUrl="/smart-match">
-                  <button
-                    type="button"
-                    className="focus-visible:outline-primary rounded text-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2"
-                  >
-                    Sign in
-                  </button>
-                </SignInButton>
+              {signedIn && (
+                <Link
+                  href="/billing"
+                  className="focus-visible:outline-primary rounded text-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2"
+                >
+                  Manage billing
+                </Link>
               )}
-
               <Link
                 href="/"
                 className="focus-visible:outline-primary inline-flex items-center gap-1.5 rounded text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2"
@@ -236,8 +221,7 @@ export default function PremiumPreview({ signedIn }: PremiumPreviewProps) {
 
             <p className="text-muted mt-5 flex items-center justify-center gap-1.5 text-xs">
               <FiLock aria-hidden="true" className="h-3 w-3" />
-
-              {signedIn ? "Premium access required" : "Sign in to check access"}
+              Payment details are handled by Stripe
             </p>
           </section>
         </div>
@@ -251,14 +235,12 @@ export default function PremiumPreview({ signedIn }: PremiumPreviewProps) {
           <p className="text-muted text-xs font-medium tracking-wider uppercase">
             What changes with Pro
           </p>
-
           <h2
             id="pro-comparison-heading"
             className="text-primary mt-2 text-xl font-semibold sm:text-2xl"
           >
             Keep the essentials. Add more direction.
           </h2>
-
           <p className="text-muted mt-3 max-w-2xl text-sm leading-relaxed">
             Browsing stays free. Pro adds SmartMatch tools for a more focused
             job search.
@@ -270,7 +252,6 @@ export default function PremiumPreview({ signedIn }: PremiumPreviewProps) {
             <caption className="sr-only">
               StackWing Free and Pro feature comparison
             </caption>
-
             <thead>
               <tr className="border-border border-b">
                 <th
@@ -279,14 +260,12 @@ export default function PremiumPreview({ signedIn }: PremiumPreviewProps) {
                 >
                   Features
                 </th>
-
                 <th
                   scope="col"
                   className="text-muted w-[21%] px-1 py-3 text-center text-xs font-medium"
                 >
                   Free
                 </th>
-
                 <th
                   scope="col"
                   className="text-primary bg-surface w-[21%] rounded-t-xl px-1 py-3 text-center text-xs font-semibold"
@@ -295,7 +274,6 @@ export default function PremiumPreview({ signedIn }: PremiumPreviewProps) {
                 </th>
               </tr>
             </thead>
-
             <tbody>
               {comparison.map((feature) => (
                 <tr
@@ -308,11 +286,9 @@ export default function PremiumPreview({ signedIn }: PremiumPreviewProps) {
                   >
                     {feature.label}
                   </th>
-
                   <td className="text-muted px-1 py-4 text-center">
                     <Included value={feature.free} />
                   </td>
-
                   <td className="bg-surface text-primary px-1 py-4 text-center">
                     <Included value={feature.pro} />
                   </td>
@@ -334,12 +310,10 @@ export default function PremiumPreview({ signedIn }: PremiumPreviewProps) {
             aria-hidden="true"
             className="text-primary mt-0.5 h-4 w-4 shrink-0"
           />
-
           <div>
             <h2 className="text-primary text-sm font-medium">
               Your data, your control
             </h2>
-
             <p className="text-muted mt-2 text-xs leading-relaxed">
               Review your extracted profile before saving. Delete your
               SmartMatch profile and cached answers from your account.
@@ -352,12 +326,10 @@ export default function PremiumPreview({ signedIn }: PremiumPreviewProps) {
             aria-hidden="true"
             className="text-primary mt-0.5 h-4 w-4 shrink-0"
           />
-
           <div>
             <h2 className="text-primary text-sm font-medium">
               Guidance, not guarantees
             </h2>
-
             <p className="text-muted mt-2 text-xs leading-relaxed">
               Recommendations use available listing information. AI can make
               mistakes, so confirm important details with the employer.

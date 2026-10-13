@@ -57,6 +57,20 @@
       "when": 1791836234272,
       "tag": "0007_job-availability",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791914086055,
+      "tag": "0008_premium-billing",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791914094028,
+      "tag": "0009_premium-billing-functions",
+      "breakpoints": true
     }
   ]
 }

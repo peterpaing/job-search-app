@@ -11,7 +11,11 @@ if (!databaseUrl) {
 }
 
 export default defineConfig({
-  schema: ["./src/db/schema.ts", "./src/db/smart-match.schema.ts"],
+  schema: [
+    "./src/db/schema.ts",
+    "./src/db/smart-match.schema.ts",
+    "./src/db/billing.schema.ts",
+  ],
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {
