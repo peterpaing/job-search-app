@@ -131,10 +131,11 @@ function SmartMatchWorkspace({
   const [usage, setUsage] = useState<SmartMatchUsageData | null>(null);
 
   const [view, setView] = useState<"matches" | "profile">("profile");
+
   const [matches, setMatches] = useState<Match[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(false);
   const [searched, setSearched] = useState(0);
-  const [strongOnly, setStrongOnly] = useState(false);
+  const [exceptionalOnly, setExceptionalOnly] = useState(false);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
 
   const mounted = useRef(false);
@@ -371,7 +372,7 @@ function SmartMatchWorkspace({
   async function refreshUsage() {
     const state = await request<ProfileState>("/profile");
 
-    // Do not overwrite unsaved profile changes.
+    // Keep unsaved profile changes untouched.
     setUsage(state.usage);
     setNotice("Usage updated.");
   }
@@ -395,7 +396,7 @@ function SmartMatchWorkspace({
       applyDraft(state.profile ?? emptyProfile);
       setSelectedJob(null);
       setMatches([]);
-      setStrongOnly(false);
+      setExceptionalOnly(false);
       setView("matches");
       setNotice("Profile saved.");
 
@@ -486,7 +487,7 @@ function SmartMatchWorkspace({
       setConsent(false);
       setMatches([]);
       setSearched(0);
-      setStrongOnly(false);
+      setExceptionalOnly(false);
       setSelectedJob(null);
       setView("profile");
       deleteDialog.current?.close();
@@ -526,12 +527,12 @@ function SmartMatchWorkspace({
     return <PremiumPreview signedIn />;
   }
 
-  const visibleMatches = strongOnly
+  const visibleMatches = exceptionalOnly
     ? matches.filter((match) => match.strength === "strong")
     : matches;
 
   const hiddenByStrengthFilter =
-    strongOnly && matches.length > 0 && visibleMatches.length === 0;
+    exceptionalOnly && matches.length > 0 && visibleMatches.length === 0;
 
   return (
     <>
@@ -934,10 +935,7 @@ function SmartMatchWorkspace({
               </h2>
 
               <p className="text-muted mt-2 max-w-3xl text-xs leading-relaxed">
-                Ranked using available skills and role information from up to
-                500 recent listings. Your work preference excludes confirmed
-                conflicting work modes; unknown work modes are labelled for you
-                to verify.
+                Based on your profile and available listing details.
               </p>
             </div>
 
@@ -945,11 +943,11 @@ function SmartMatchWorkspace({
               <label className="text-muted flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
-                  checked={strongOnly}
-                  onChange={(event) => setStrongOnly(event.target.checked)}
+                  checked={exceptionalOnly}
+                  onChange={(event) => setExceptionalOnly(event.target.checked)}
                   className="accent-black"
                 />
-                Strong overlap only
+                Exceptional matches only
               </label>
 
               <button
@@ -974,23 +972,23 @@ function SmartMatchWorkspace({
 
               <h3 className="text-primary mt-5 text-xl font-semibold">
                 {hiddenByStrengthFilter
-                  ? "No strong-overlap jobs yet"
+                  ? "No exceptional matches yet"
                   : "No matching jobs yet"}
               </h3>
 
               <p className="text-muted mt-3 max-w-md text-sm">
                 {hiddenByStrengthFilter
-                  ? "Other skill matches and related roles are available. Clear this filter to see them."
+                  ? "Other matches are available. Clear this filter to see them."
                   : "The available listing details don’t show a match yet. Try broader roles or preferences, or browse all jobs."}
               </p>
 
               {hiddenByStrengthFilter ? (
                 <button
                   type="button"
-                  onClick={() => setStrongOnly(false)}
+                  onClick={() => setExceptionalOnly(false)}
                   className={`${buttonClass} mt-6`}
                 >
-                  Show all recommendations
+                  Show all matches
                 </button>
               ) : (
                 <button

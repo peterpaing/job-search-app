@@ -101,6 +101,20 @@ export default function JobCard({
   const hasValidDate = !Number.isNaN(postedDate.getTime());
   const logoUrl = job.companyLogo?.trim() || null;
 
+  const matchLabel =
+    matchDetails?.strength === "strong"
+      ? "Exceptional match"
+      : matchDetails?.strength === "partial"
+        ? "High match"
+        : "Related role";
+
+  const matchColors =
+    matchDetails?.strength === "strong"
+      ? "border-amber-300 bg-amber-50 text-amber-900"
+      : matchDetails?.strength === "partial"
+        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+        : "border-blue-200 bg-blue-50 text-blue-800";
+
   return (
     <article
       className={`border-border bg-background flex min-h-[250px] flex-col rounded-2xl border p-5 ${
@@ -110,26 +124,10 @@ export default function JobCard({
       {matchDetails && (
         <div className="border-border mb-4 flex flex-wrap items-center gap-2 border-b pb-4">
           <span
-            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
-              matchDetails.strength === "strong"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                : matchDetails.strength === "partial"
-                  ? "border-amber-200 bg-amber-50 text-amber-800"
-                  : "border-blue-200 bg-blue-50 text-blue-800"
-            }`}
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${matchColors}`}
           >
-            {matchDetails.strength === "strong"
-              ? "Strong skill overlap"
-              : matchDetails.strength === "partial"
-                ? "Partial skill overlap"
-                : "Related role · skills unconfirmed"}
+            {matchLabel}
           </span>
-
-          {matchDetails.workMode === "unknown" && (
-            <span className="border-border bg-surface text-muted rounded-full border px-3 py-1.5 text-xs">
-              Work mode unconfirmed
-            </span>
-          )}
         </div>
       )}
 
