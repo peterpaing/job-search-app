@@ -12,12 +12,17 @@ const mocks = vi.hoisted(() => ({
   extract: vi.fn(),
   answer: vi.fn(),
   bootstrap: vi.fn(),
+  hasPremium: vi.fn(),
 }));
 
 vi.mock("@clerk/express", () => ({
   clerkMiddleware: () => (_req: unknown, _res: unknown, next: () => void) =>
     next(),
   getAuth: mocks.getAuth,
+}));
+
+vi.mock("../../services/billing.service.js", () => ({
+  hasPremium: mocks.hasPremium,
 }));
 
 vi.mock("../../services/smart-match.service.js", () => ({
@@ -57,7 +62,6 @@ describe("SmartMatch routes", () => {
   beforeEach(() => {
     vi.resetAllMocks();
 
-    vi.stubEnv("SMARTMATCH_PREMIUM_USER_IDS", "user_verified");
     vi.stubEnv("SMARTMATCH_AI_ENABLED", "false");
     vi.stubEnv("SMARTMATCH_USER_DAILY_LIMIT", "20");
     vi.stubEnv("SMARTMATCH_DAILY_BUDGET_CENTS", "500");
@@ -66,6 +70,10 @@ describe("SmartMatch routes", () => {
       isAuthenticated: true,
       userId: "user_verified",
     });
+
+    mocks.hasPremium.mockImplementation(
+      async (clerkUserId: string) => clerkUserId === "user_verified",
+    );
 
     mocks.getState.mockResolvedValue({
       profile: null,
@@ -100,6 +108,7 @@ describe("SmartMatch routes", () => {
     const result = await request(app).get("/api/smart-match/access");
 
     expect(result.status).toBe(401);
+    expect(mocks.hasPremium).not.toHaveBeenCalled();
   });
 
   it("requires a verified user ID", async () => {
@@ -111,6 +120,7 @@ describe("SmartMatch routes", () => {
     const result = await request(app).get("/api/smart-match/profile");
 
     expect(result.status).toBe(401);
+    expect(mocks.hasPremium).not.toHaveBeenCalled();
     expect(mocks.getState).not.toHaveBeenCalled();
   });
 
@@ -121,6 +131,7 @@ describe("SmartMatch routes", () => {
 
     expect(result.status).toBe(200);
     expect(result.body.premium).toBe(true);
+    expect(mocks.hasPremium).toHaveBeenCalledWith("user_verified");
     expect(result.headers["cache-control"]).toBe("no-store");
   });
 
@@ -128,17 +139,21 @@ describe("SmartMatch routes", () => {
     const result = await request(app).get(
       "/api/smart-match/bootstrap?userId=forged&premium=true",
     );
+
     expect(result.status).toBe(200);
     expect(result.body.access.premium).toBe(true);
+    expect(mocks.hasPremium).toHaveBeenCalledWith("user_verified");
     expect(mocks.bootstrap).toHaveBeenCalledWith("user_verified");
     expect(result.headers["cache-control"]).toBe("no-store");
   });
 
   it("does not read private bootstrap data for a non-premium user", async () => {
-    vi.stubEnv("SMARTMATCH_PREMIUM_USER_IDS", "");
+    mocks.hasPremium.mockResolvedValue(false);
+
     const result = await request(app).get(
       "/api/smart-match/bootstrap?premium=true",
     );
+
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({
       access: { premium: false },
@@ -147,25 +162,32 @@ describe("SmartMatch routes", () => {
       matches: [],
       searched: 0,
     });
+    expect(mocks.hasPremium).toHaveBeenCalledWith("user_verified");
     expect(mocks.bootstrap).not.toHaveBeenCalled();
   });
 
   it("requires authentication before bootstrap", async () => {
-    mocks.getAuth.mockReturnValue({ isAuthenticated: false, userId: null });
-    expect((await request(app).get("/api/smart-match/bootstrap")).status).toBe(
-      401,
-    );
+    mocks.getAuth.mockReturnValue({
+      isAuthenticated: false,
+      userId: null,
+    });
+
+    const result = await request(app).get("/api/smart-match/bootstrap");
+
+    expect(result.status).toBe(401);
+    expect(mocks.hasPremium).not.toHaveBeenCalled();
     expect(mocks.bootstrap).not.toHaveBeenCalled();
   });
 
   it.each(endpoints)("blocks non-premium %s %s", async (method, path) => {
-    vi.stubEnv("SMARTMATCH_PREMIUM_USER_IDS", "");
+    mocks.hasPremium.mockResolvedValue(false);
 
     const result = await request(app)
       [method](`/api/smart-match${path}`)
       .send(profile);
 
     expect(result.status).toBe(403);
+    expect(mocks.hasPremium).toHaveBeenCalledWith("user_verified");
     expect(mocks.getState).not.toHaveBeenCalled();
     expect(mocks.storeProfile).not.toHaveBeenCalled();
     expect(mocks.getJobs).not.toHaveBeenCalled();

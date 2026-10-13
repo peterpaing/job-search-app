@@ -1,5 +1,4 @@
 import { render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PremiumPreview from "../../app/component/PremiumPreview";
@@ -27,14 +26,14 @@ describe("PremiumPreview", () => {
     vi.clearAllMocks();
   });
 
-  it("shows the planned monthly price and benefits", () => {
+  it("shows the monthly price and benefits", () => {
     render(<PremiumPreview signedIn />);
 
     expect(screen.getByText("$1.99")).toBeInTheDocument();
     expect(screen.getByText("/ month")).toBeInTheDocument();
 
     expect(
-      screen.getByText("Planned monthly price in USD."),
+      screen.getByText("Monthly price in USD. AI usage limits apply."),
     ).toBeInTheDocument();
 
     expect(
@@ -50,34 +49,36 @@ describe("PremiumPreview", () => {
     ).toBeInTheDocument();
   });
 
-  it("keeps payment unavailable", async () => {
-    const user = userEvent.setup();
-
+  it("sends signed-in users to billing and explains renewal", () => {
     render(<PremiumPreview signedIn />);
 
-    const button = screen.getByRole("button", {
-      name: "Payments coming soon",
-    });
-
-    expect(button).toBeDisabled();
-
-    await user.click(button);
+    expect(
+      screen.getByRole("link", { name: "Upgrade to Pro" }),
+    ).toHaveAttribute("href", "/billing");
 
     expect(
-      screen.getByText("No checkout or payment is available yet."),
+      screen.getByRole("link", { name: "Manage billing" }),
+    ).toHaveAttribute("href", "/billing");
+
+    expect(
+      screen.getByText("Renews monthly until cancelled."),
     ).toBeInTheDocument();
 
     expect(
-      screen.queryByRole("link", {
-        name: /buy|subscribe/i,
-      }),
+      screen.getByText("Cancel future renewals from your billing page."),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByText("Payment details are handled by Stripe"),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.queryByRole("button", { name: "Payments coming soon" }),
     ).not.toBeInTheDocument();
   });
 
-  it("preserves the access notice and free browsing", () => {
+  it("preserves free browsing without showing sign-in to signed-in users", () => {
     render(<PremiumPreview signedIn />);
-
-    expect(screen.getByText("Premium access required")).toBeInTheDocument();
 
     expect(screen.getByRole("link", { name: "Explore jobs" })).toHaveAttribute(
       "href",
@@ -85,25 +86,31 @@ describe("PremiumPreview", () => {
     );
 
     expect(
-      screen.queryByRole("button", { name: "Sign in" }),
+      screen.queryByRole("button", { name: "Sign in to upgrade" }),
     ).not.toBeInTheDocument();
+
+    expect(mocks.signInOptions).not.toHaveBeenCalled();
   });
 
-  it("offers sign-in without unlocking paid access", () => {
+  it("requires sign-in before sending signed-out users to billing", () => {
     render(<PremiumPreview signedIn={false} />);
 
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Sign in to upgrade" }),
+    ).toBeEnabled();
 
     expect(mocks.signInOptions).toHaveBeenCalledWith({
       mode: "modal",
-      forceRedirectUrl: "/smart-match",
+      forceRedirectUrl: "/billing",
     });
 
     expect(
-      screen.getByRole("button", {
-        name: "Payments coming soon",
-      }),
-    ).toBeDisabled();
+      screen.queryByRole("link", { name: "Upgrade to Pro" }),
+    ).not.toBeInTheDocument();
+
+    expect(
+      screen.queryByRole("link", { name: "Manage billing" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps saving and tracking available on Free", () => {
@@ -124,7 +131,6 @@ describe("PremiumPreview", () => {
     });
 
     expect(within(row).getByText("Not included")).toBeInTheDocument();
-
     expect(within(row).getByText("Included")).toBeInTheDocument();
 
     expect(

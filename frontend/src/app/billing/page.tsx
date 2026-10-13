@@ -118,6 +118,15 @@ function StatusBadge({ status }: { status: BillingStatus | null }) {
     </span>
   );
 }
+const [now, setNow] = useState(() => Date.now());
+
+useEffect(() => {
+  const timer = window.setInterval(() => {
+    setNow(Date.now());
+  }, 1000);
+
+  return () => window.clearInterval(timer);
+}, []);
 
 function SubscriptionDetails({ status }: { status: BillingStatus }) {
   const paidDate = status.paidUntil
@@ -129,7 +138,7 @@ function SubscriptionDetails({ status }: { status: BillingStatus }) {
     : null;
 
   const paidPeriodEnded = status.paidUntil
-    ? Date.parse(status.paidUntil) <= Date.now()
+    ? Date.parse(status.paidUntil) <= now
     : false;
 
   const subscriptionEnded = ["canceled", "incomplete_expired"].includes(

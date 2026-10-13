@@ -194,7 +194,7 @@ describe("ProfilePage", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("clearly identifies subscriptions as unavailable", () => {
+  it("provides billing management and explains cancellation", () => {
     renderSignedInProfile();
 
     const subscription = screen.getByRole("region", {
@@ -207,11 +207,27 @@ describe("ProfilePage", () => {
       }),
     ).toBeInTheDocument();
 
-    expect(within(subscription).getByText("Coming soon")).toBeInTheDocument();
+    expect(
+      within(subscription).getByRole("link", {
+        name: "Open billing & subscription",
+      }),
+    ).toHaveAttribute("href", "/billing");
 
     expect(subscription).toHaveTextContent(
-      "Paid subscriptions are not available yet.",
+      "Cancellation stops future renewals.",
     );
+
+    expect(subscription).toHaveTextContent(
+      "Your Pro access continues until the paid period ends.",
+    );
+
+    expect(subscription).toHaveTextContent(
+      "Existing AI allowances still apply.",
+    );
+
+    expect(
+      within(subscription).queryByText("Coming soon"),
+    ).not.toBeInTheDocument();
   });
 
   it("includes the privacy explanations", () => {

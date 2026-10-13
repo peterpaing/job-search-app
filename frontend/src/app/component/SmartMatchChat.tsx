@@ -279,6 +279,22 @@ export default function SmartMatchChat({
             placeholder="Ask about your fit or this listing…"
             onChange={(event) => setQuestion(event.target.value)}
             className="application-notes text-primary focus-visible:outline-primary max-h-28 min-h-16 min-w-0 flex-1 resize-none overflow-y-auto rounded-xl bg-transparent px-2 py-2 text-sm leading-relaxed focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
+            onKeyDown={(event) => {
+              if (
+                event.key !== "Enter" ||
+                event.shiftKey ||
+                event.nativeEvent.isComposing ||
+                event.nativeEvent.keyCode === 229
+              ) {
+                return;
+              }
+
+              event.preventDefault();
+
+              if (!event.repeat) {
+                void submitQuestion();
+              }
+            }}
           />
 
           <button
