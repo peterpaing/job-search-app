@@ -118,17 +118,17 @@ function StatusBadge({ status }: { status: BillingStatus | null }) {
     </span>
   );
 }
-const [now, setNow] = useState(() => Date.now());
-
-useEffect(() => {
-  const timer = window.setInterval(() => {
-    setNow(Date.now());
-  }, 1000);
-
-  return () => window.clearInterval(timer);
-}, []);
-
 function SubscriptionDetails({ status }: { status: BillingStatus }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
   const paidDate = status.paidUntil
     ? new Date(status.paidUntil).toLocaleDateString(undefined, {
         year: "numeric",
