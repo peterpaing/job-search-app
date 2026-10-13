@@ -50,16 +50,7 @@ function readLimit(name: string, fallback: number): number {
 }
 
 export function getSmartMatchConfig() {
-  const premiumUsers = new Set(
-    (process.env.SMARTMATCH_PREMIUM_USER_IDS ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean),
-  );
-
   return {
-    premiumUsers,
-
     enabled:
       process.env.SMARTMATCH_AI_ENABLED === "true" &&
       Boolean(process.env.OPENAI_API_KEY?.trim()),
