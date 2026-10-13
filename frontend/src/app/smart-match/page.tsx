@@ -51,6 +51,14 @@ type MatchesResponse = {
   searched: number;
 };
 
+type BootstrapResponse = {
+  access: Access;
+  profile: Profile | null;
+  usage: SmartMatchUsageData | null;
+  matches: Match[];
+  searched: number;
+};
+
 type ExtractionResponse = {
   draft: Profile;
   cached: boolean;
@@ -162,10 +170,16 @@ function SmartMatchWorkspace({
   }, []);
 
   const request = useCallback(
-    async <T,>(path: string, method = "GET", body?: unknown): Promise<T> => {
+    async <T,>(
+      path: string,
+      method = "GET",
+      body?: unknown,
+      cancellation?: AbortSignal,
+    ): Promise<T> => {
       const session = clerk.session;
 
       if (
+        cancellation?.aborted ||
         !mounted.current ||
         clerk.user?.id !== userId ||
         session?.id !== sessionId
@@ -176,6 +190,7 @@ function SmartMatchWorkspace({
       const token = await session.getToken();
 
       if (
+        cancellation?.aborted ||
         !token ||
         !mounted.current ||
         clerk.user?.id !== userId ||
@@ -198,7 +213,9 @@ function SmartMatchWorkspace({
         const response = await fetch(url, {
           method,
           cache: "no-store",
-          signal: controller.signal,
+          signal: cancellation
+            ? AbortSignal.any([controller.signal, cancellation])
+            : controller.signal,
 
           headers: {
             Authorization: `Bearer ${token}`,
@@ -256,27 +273,27 @@ function SmartMatchWorkspace({
 
   useEffect(() => {
     let current = true;
+    const cancellation = new AbortController();
 
     async function load() {
       setLoading(true);
       setError(null);
 
       try {
-        const accessResult = await request<Access>("/access");
+        const state = await request<BootstrapResponse>(
+          "/bootstrap",
+          "GET",
+          undefined,
+          cancellation.signal,
+        );
 
         if (!current) {
           return;
         }
 
-        setAccess(accessResult);
+        setAccess(state.access);
 
-        if (!accessResult.premium) {
-          return;
-        }
-
-        const state = await request<ProfileState>("/profile");
-
-        if (!current) {
+        if (!state.access.premium) {
           return;
         }
 
@@ -285,23 +302,13 @@ function SmartMatchWorkspace({
         setDraft(state.profile ?? emptyProfile);
         setSkillsText("");
         setRolesText("");
+        setMatches(state.matches);
+        setSearched(state.searched);
 
         if (state.profile) {
           setView("matches");
-          setMatchesLoading(true);
-
-          try {
-            const result = await request<MatchesResponse>("/matches");
-
-            if (current) {
-              setMatches(result.matches);
-              setSearched(result.searched);
-            }
-          } finally {
-            if (current) {
-              setMatchesLoading(false);
-            }
-          }
+        } else {
+          setView("profile");
         }
       } catch (failure) {
         if (current && mounted.current) {
@@ -322,6 +329,7 @@ function SmartMatchWorkspace({
 
     return () => {
       current = false;
+      cancellation.abort();
     };
   }, [request, retry]);
 

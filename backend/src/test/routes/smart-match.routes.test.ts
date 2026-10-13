@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getJobs: vi.fn(),
   extract: vi.fn(),
   answer: vi.fn(),
+  bootstrap: vi.fn(),
 }));
 
 vi.mock("@clerk/express", () => ({
@@ -25,6 +26,10 @@ vi.mock("../../services/smart-match.service.js", () => ({
   getSmartMatchJobs: mocks.getJobs,
   extractSmartMatchProfile: mocks.extract,
   answerSmartMatchQuestion: mocks.answer,
+}));
+
+vi.mock("../../services/smart-match-bootstrap.service.js", () => ({
+  getSmartMatchBootstrap: mocks.bootstrap,
 }));
 
 const app = express();
@@ -69,6 +74,12 @@ describe("SmartMatch routes", () => {
 
     mocks.storeProfile.mockResolvedValue({ profile });
     mocks.getJobs.mockResolvedValue({ matches: [], searched: 0 });
+    mocks.bootstrap.mockResolvedValue({
+      profile,
+      usage: {},
+      matches: [],
+      searched: 0,
+    });
     mocks.extract.mockResolvedValue({ draft: profile });
     mocks.answer.mockResolvedValue({
       answer: "Review the React requirements.",
@@ -111,6 +122,40 @@ describe("SmartMatch routes", () => {
     expect(result.status).toBe(200);
     expect(result.body.premium).toBe(true);
     expect(result.headers["cache-control"]).toBe("no-store");
+  });
+
+  it("bootstraps only the verified identity, never a query-supplied user", async () => {
+    const result = await request(app).get(
+      "/api/smart-match/bootstrap?userId=forged&premium=true",
+    );
+    expect(result.status).toBe(200);
+    expect(result.body.access.premium).toBe(true);
+    expect(mocks.bootstrap).toHaveBeenCalledWith("user_verified");
+    expect(result.headers["cache-control"]).toBe("no-store");
+  });
+
+  it("does not read private bootstrap data for a non-premium user", async () => {
+    vi.stubEnv("SMARTMATCH_PREMIUM_USER_IDS", "");
+    const result = await request(app).get(
+      "/api/smart-match/bootstrap?premium=true",
+    );
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      access: { premium: false },
+      profile: null,
+      usage: null,
+      matches: [],
+      searched: 0,
+    });
+    expect(mocks.bootstrap).not.toHaveBeenCalled();
+  });
+
+  it("requires authentication before bootstrap", async () => {
+    mocks.getAuth.mockReturnValue({ isAuthenticated: false, userId: null });
+    expect((await request(app).get("/api/smart-match/bootstrap")).status).toBe(
+      401,
+    );
+    expect(mocks.bootstrap).not.toHaveBeenCalled();
   });
 
   it.each(endpoints)("blocks non-premium %s %s", async (method, path) => {
