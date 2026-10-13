@@ -10,24 +10,48 @@ for (const viewport of [
     page,
   }) => {
     await page.setViewportSize(viewport);
+
     const privateRequests: string[] = [];
+
     page.on("request", (request) => {
       if (new URL(request.url()).pathname.startsWith("/api/smart-match")) {
         privateRequests.push(request.url());
       }
     });
+
     await page.goto("/smart-match");
+
     await expect(
-      page.getByRole("heading", { name: "Your next role, with more clarity." }),
+      page.getByRole("heading", {
+        name: "Your next role, with more clarity.",
+      }),
     ).toBeVisible();
+
     await expect(page.getByText("$1.99", { exact: true })).toBeVisible();
+
+    const signInButton = page.getByRole("button", {
+      name: "Sign in to upgrade",
+    });
+
+    await expect(signInButton).toBeVisible();
+    await expect(signInButton).toBeEnabled();
+
     await expect(
-      page.getByRole("button", { name: "Payments coming soon" }),
-    ).toBeDisabled();
+      page.getByRole("link", { name: "Upgrade to Pro" }),
+    ).toHaveCount(0);
+
+    await expect(
+      page.getByText("Renews monthly until cancelled.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+
     await expect(
       page.getByRole("status", { name: "Loading SmartMatch" }),
     ).toHaveCount(0);
+
     expect(privateRequests).toEqual([]);
+
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,

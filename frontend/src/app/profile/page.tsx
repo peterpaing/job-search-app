@@ -1,8 +1,10 @@
 "use client";
 
 import { SignIn, SignOutButton, UserProfile, useUser } from "@clerk/nextjs";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import {
+  HiOutlineArrowRight,
   HiOutlineArrowRightOnRectangle,
   HiOutlineChatBubbleLeftRight,
   HiOutlineCreditCard,
@@ -11,7 +13,10 @@ import {
 } from "react-icons/hi2";
 
 const buttonClass =
-  "border-border text-primary hover:bg-surface focus-visible:outline-primary inline-flex items-center justify-center rounded-full border px-5 py-2.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2";
+  "border-border text-primary hover:bg-surface focus-visible:outline-primary inline-flex items-center justify-center gap-2 rounded-full border px-5 py-2.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2";
+
+const primaryButtonClass =
+  "bg-primary text-background focus-visible:outline-primary inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-medium transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2";
 
 function AccountSection({
   title,
@@ -26,7 +31,6 @@ function AccountSection({
     <div className="text-primary">
       <div className="border-border mb-6 border-b pb-5">
         <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
-
         <p className="text-muted mt-2 text-sm leading-relaxed">{description}</p>
       </div>
 
@@ -39,19 +43,38 @@ function ProSubscription() {
   return (
     <AccountSection
       title="Pro subscription"
-      description="Your subscription and billing information."
+      description="Manage your StackWing Pro subscription and payment details."
     >
       <div className="border-border rounded-2xl border p-5 sm:p-6">
-        <span className="bg-surface text-muted inline-flex rounded-full px-3 py-1 text-xs font-medium">
-          Coming soon
-        </span>
+        <div className="flex items-start gap-3">
+          <span className="bg-surface flex h-11 w-11 shrink-0 items-center justify-center rounded-xl">
+            <HiOutlineCreditCard aria-hidden="true" className="h-5 w-5" />
+          </span>
 
-        <h3 className="mt-4 text-base font-semibold">StackWing Pro</h3>
+          <div>
+            <h3 className="text-base font-semibold">StackWing Pro</h3>
+            <p className="text-muted mt-1 text-sm">
+              Your subscription, in one place.
+            </p>
+          </div>
+        </div>
 
-        <p className="text-muted mt-2 text-sm leading-relaxed">
-          Paid subscriptions are not available yet. Plan details, benefits, and
-          billing controls will appear here when payments are connected.
+        <p className="text-muted mt-5 text-sm leading-relaxed">
+          View your current access and paid period, update your payment method,
+          download invoices, or cancel future renewals.
         </p>
+
+        <Link href="/billing" className={`${primaryButtonClass} mt-6`}>
+          Open billing & subscription
+          <HiOutlineArrowRight aria-hidden="true" className="h-4 w-4" />
+        </Link>
+
+        <div className="border-border mt-6 border-t pt-5">
+          <p className="text-muted text-xs leading-relaxed">
+            Cancellation stops future renewals. Your Pro access continues until
+            the paid period ends. Existing AI allowances still apply.
+          </p>
+        </div>
       </div>
     </AccountSection>
   );
@@ -66,7 +89,6 @@ function Privacy() {
       <div className="space-y-6">
         <div>
           <h3 className="text-sm font-semibold">Account information</h3>
-
           <p className="text-muted mt-2 text-sm leading-relaxed">
             Clerk manages your sign-in account, including your name, avatar,
             email addresses, connected sign-in methods, and sessions.
@@ -75,7 +97,6 @@ function Privacy() {
 
         <div>
           <h3 className="text-sm font-semibold">Profile visibility</h3>
-
           <p className="text-muted mt-2 text-sm leading-relaxed">
             StackWing does not currently provide a public member profile page.
             Your account panel is intended for you to manage your own account.
@@ -84,16 +105,19 @@ function Privacy() {
 
         <div>
           <h3 className="text-sm font-semibold">Job browsing</h3>
-
           <p className="text-muted mt-2 text-sm leading-relaxed">
             You can browse and search job listings without creating an account.
           </p>
         </div>
 
-        <p className="border-border text-muted border-t pt-5 text-xs leading-relaxed">
-          This summary will be updated when saved jobs, application tracking,
-          and payments are connected.
-        </p>
+        <div>
+          <h3 className="text-sm font-semibold">Payments and subscriptions</h3>
+          <p className="text-muted mt-2 text-sm leading-relaxed">
+            Stripe handles payment details and subscription billing. StackWing
+            stores billing references and subscription status to verify your Pro
+            access, but does not store your card details.
+          </p>
+        </div>
       </div>
     </AccountSection>
   );
@@ -218,7 +242,6 @@ export default function ProfilePage() {
       <section className="bg-background px-4 py-10 sm:px-6 lg:px-8">
         <div role="status" className="mx-auto max-w-7xl">
           <span className="sr-only">Loading account…</span>
-
           <div
             aria-hidden="true"
             className="border-border bg-surface h-[600px] rounded-2xl border motion-safe:animate-pulse"
@@ -266,7 +289,6 @@ export default function ProfilePage() {
           }}
         >
           <UserProfile.Page label="account" />
-
           <UserProfile.Page label="security" />
 
           <UserProfile.Page

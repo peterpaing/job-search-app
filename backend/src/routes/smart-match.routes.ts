@@ -6,6 +6,7 @@ import {
   getSmartMatchConfig,
   profileSchema,
 } from "../services/smart-match.logic.js";
+import { BillingError } from "../services/billing.config.js";
 
 const extractSchema = z
   .object({
@@ -58,11 +59,15 @@ export function createSmartMatchRouter(frontendOrigin: string) {
     try {
       const config = getSmartMatchConfig();
       const clerkUserId = res.locals.clerkUserId as string;
+
+      const { hasPremium } = await import("../services/billing.service.js");
+
       const access = {
-        premium: config.premiumUsers.has(clerkUserId),
+        premium: await hasPremium(clerkUserId),
         aiEnabled: config.enabled,
         dailyLimit: config.userDailyLimit,
       };
+
       if (!access.premium) {
         res.json({
           access,
@@ -73,20 +78,26 @@ export function createSmartMatchRouter(frontendOrigin: string) {
         });
         return;
       }
+
       const { getSmartMatchBootstrap } =
         await import("../services/smart-match-bootstrap.service.js");
-      res.json({ access, ...(await getSmartMatchBootstrap(clerkUserId)) });
+
+      res.json({
+        access,
+        ...(await getSmartMatchBootstrap(clerkUserId)),
+      });
     } catch (error) {
       next(error);
     }
   });
 
-  router.get("/access", (_req, res, next) => {
+  router.get("/access", async (_req, res, next) => {
     try {
       const config = getSmartMatchConfig();
+      const { hasPremium } = await import("../services/billing.service.js");
 
       res.json({
-        premium: config.premiumUsers.has(res.locals.clerkUserId as string),
+        premium: await hasPremium(res.locals.clerkUserId as string),
         aiEnabled: config.enabled,
         dailyLimit: config.userDailyLimit,
       });
@@ -95,15 +106,13 @@ export function createSmartMatchRouter(frontendOrigin: string) {
     }
   });
 
-  // Every private endpoint checks premium on the server.
-  router.use((_req, res, next) => {
+  router.use(async (_req, res, next) => {
     try {
-      const config = getSmartMatchConfig();
+      const { hasPremium } = await import("../services/billing.service.js");
 
-      if (!config.premiumUsers.has(res.locals.clerkUserId as string)) {
+      if (!(await hasPremium(res.locals.clerkUserId as string))) {
         res.status(403).json({
-          message:
-            "SmartMatch is a StackWing Pro feature. Paid plans are coming soon.",
+          message: "An active, paid StackWing Pro subscription is required.",
         });
         return;
       }
@@ -234,7 +243,7 @@ export function createSmartMatchRouter(frontendOrigin: string) {
       return;
     }
 
-    if (error instanceof SmartMatchError) {
+    if (error instanceof SmartMatchError || error instanceof BillingError) {
       res.status(error.status).json({ message: error.message });
       return;
     }
