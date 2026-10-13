@@ -54,6 +54,33 @@ export function createSmartMatchRouter(frontendOrigin: string) {
     }
   });
 
+  router.get("/bootstrap", async (_req, res, next) => {
+    try {
+      const config = getSmartMatchConfig();
+      const clerkUserId = res.locals.clerkUserId as string;
+      const access = {
+        premium: config.premiumUsers.has(clerkUserId),
+        aiEnabled: config.enabled,
+        dailyLimit: config.userDailyLimit,
+      };
+      if (!access.premium) {
+        res.json({
+          access,
+          profile: null,
+          usage: null,
+          matches: [],
+          searched: 0,
+        });
+        return;
+      }
+      const { getSmartMatchBootstrap } =
+        await import("../services/smart-match-bootstrap.service.js");
+      res.json({ access, ...(await getSmartMatchBootstrap(clerkUserId)) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/access", (_req, res, next) => {
     try {
       const config = getSmartMatchConfig();

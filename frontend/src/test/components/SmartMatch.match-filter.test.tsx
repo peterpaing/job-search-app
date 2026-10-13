@@ -1,4 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SmartMatchPage from "../../app/smart-match/page";
 
@@ -18,8 +25,8 @@ vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({
     isLoaded: true,
     isSignedIn: true,
-    userId: "user-match-test",
-    sessionId: "session-match-test",
+    userId: clerkMocks.clerk.user.id,
+    sessionId: clerkMocks.clerk.session.id,
   }),
   useClerk: () => clerkMocks.clerk,
 }));
@@ -83,6 +90,8 @@ let responseMatches = [exceptionalMatch, highMatch];
 
 beforeEach(() => {
   responseMatches = [exceptionalMatch, highMatch];
+  clerkMocks.clerk.user.id = "user-match-test";
+  clerkMocks.clerk.session.id = "session-match-test";
 
   clerkMocks.clerk.session.getToken.mockReset().mockResolvedValue("test-token");
 
@@ -93,14 +102,9 @@ beforeEach(() => {
 
     let payload: unknown;
 
-    if (url.endsWith("/access")) {
+    if (url.endsWith("/bootstrap")) {
       payload = {
-        premium: true,
-        aiEnabled: true,
-        dailyLimit: 20,
-      };
-    } else if (url.endsWith("/profile")) {
-      payload = {
+        access: { premium: true, aiEnabled: true, dailyLimit: 20 },
         profile: {
           skills: ["React", "TypeScript"],
           roles: ["Frontend Engineer"],
@@ -114,9 +118,6 @@ beforeEach(() => {
           remaining: 20,
           resetsAt: "2026-10-14T00:00:00Z",
         },
-      };
-    } else if (url.endsWith("/matches")) {
-      payload = {
         matches: responseMatches,
         searched: 20,
       };
@@ -140,6 +141,96 @@ afterEach(() => {
 });
 
 describe("SmartMatch exceptional filter", () => {
+  it("does not duplicate loading during development Strict Mode effect replay", async () => {
+    render(
+      <StrictMode>
+        <SmartMatchPage />
+      </StrictMode>,
+    );
+    await screen.findByRole("heading", { name: "High Frontend Role" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it("opens the premium preview without requesting a profile or matches", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access: { premium: false, aiEnabled: true, dailyLimit: 20 },
+          profile: null,
+          usage: null,
+          matches: [],
+          searched: 0,
+        }),
+      ),
+    );
+    render(<SmartMatchPage />);
+    expect(await screen.findByText("Premium preview")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("heading", { name: "High Frontend Role" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens the profile editor without an unnecessary matches request when no profile is saved", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access: { premium: true, aiEnabled: true, dailyLimit: 20 },
+          profile: null,
+          usage: null,
+          matches: [],
+          searched: 0,
+        }),
+      ),
+    );
+    render(<SmartMatchPage />);
+    expect(
+      await screen.findByRole("heading", {
+        name: "Review your developer profile",
+      }),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts old loading and ignores its response after switching accounts", async () => {
+    let finishOld!: (response: Response) => void;
+    const oldResponse = new Promise<Response>((resolve) => {
+      finishOld = resolve;
+    });
+    fetchMock.mockImplementationOnce(() => oldResponse);
+    const rendered = render(<SmartMatchPage />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const oldSignal = fetchMock.mock.calls[0]![1]!.signal;
+    clerkMocks.clerk.user.id = "user-second";
+    clerkMocks.clerk.session.id = "session-second";
+    rendered.rerender(<SmartMatchPage />);
+    await screen.findByRole("heading", { name: "High Frontend Role" });
+    expect(oldSignal?.aborted).toBe(true);
+    await act(async () => {
+      finishOld(
+        new Response(
+          JSON.stringify({
+            access: { premium: false, aiEnabled: true, dailyLimit: 20 },
+            profile: null,
+            usage: null,
+            matches: [],
+            searched: 0,
+          }),
+        ),
+      );
+    });
+    expect(screen.queryByText("Premium preview")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "High Frontend Role" }),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("loads the workspace with one initial private request", async () => {
+    render(<SmartMatchPage />);
+    await screen.findByRole("heading", { name: "High Frontend Role" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toMatch(/\/bootstrap$/);
+  });
   it("shows the renamed filter and short matching note", async () => {
     render(<SmartMatchPage />);
 

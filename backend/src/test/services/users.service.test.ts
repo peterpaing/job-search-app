@@ -58,7 +58,7 @@ describe("getOrCreateUser", () => {
     });
 
     mocks.returning.mockResolvedValue([storedUser]);
-    mocks.limit.mockResolvedValue([storedUser]);
+    mocks.limit.mockResolvedValue([]);
   });
 
   it("creates and returns a new user", async () => {
@@ -70,7 +70,7 @@ describe("getOrCreateUser", () => {
       clerkUserId: "user_test",
     });
 
-    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.select).toHaveBeenCalledTimes(1);
   });
 
   it("uses the unique Clerk ID to handle duplicate inserts", async () => {
@@ -81,18 +81,38 @@ describe("getOrCreateUser", () => {
     });
   });
 
-  it("returns the existing user after an insert conflict", async () => {
-    mocks.returning.mockResolvedValue([]);
+  it("returns an existing user without an insert", async () => {
+    mocks.limit.mockResolvedValue([storedUser]);
 
     await expect(getOrCreateUser("user_test")).resolves.toEqual(storedUser);
 
     expect(mocks.select).toHaveBeenCalledTimes(1);
     expect(mocks.from).toHaveBeenCalledWith(users);
     expect(mocks.limit).toHaveBeenCalledWith(1);
+    expect(mocks.insert).not.toHaveBeenCalled();
+  });
+
+  it("handles another request creating the account after the first read", async () => {
+    mocks.limit.mockResolvedValueOnce([]).mockResolvedValueOnce([storedUser]);
+    mocks.returning.mockResolvedValue([]);
+    await expect(getOrCreateUser("user_test")).resolves.toEqual(storedUser);
+    expect(mocks.select).toHaveBeenCalledTimes(2);
+  });
+
+  it("shares pending requests for the same identity but does not cache completed users", async () => {
+    mocks.limit.mockResolvedValue([storedUser]);
+    const results = await Promise.all([
+      getOrCreateUser("user_test"),
+      getOrCreateUser("user_test"),
+    ]);
+    expect(results).toEqual([storedUser, storedUser]);
+    expect(mocks.select).toHaveBeenCalledTimes(1);
+    await getOrCreateUser("user_test");
+    expect(mocks.select).toHaveBeenCalledTimes(2);
   });
 
   it("looks up the exact Clerk ID using a parameterized query", async () => {
-    mocks.returning.mockResolvedValue([]);
+    mocks.limit.mockResolvedValue([storedUser]);
 
     await getOrCreateUser("user_test");
 
@@ -101,6 +121,33 @@ describe("getOrCreateUser", () => {
 
     expect(query.sql).toBe('"users"."clerk_user_id" = $1');
     expect(query.params).toEqual(["user_test"]);
+  });
+
+  it("does not share a pending lookup between different accounts", async () => {
+    const secondUser = {
+      ...storedUser,
+      id: "second-account",
+      clerkUserId: "user_second",
+    };
+    mocks.limit
+      .mockResolvedValueOnce([storedUser])
+      .mockResolvedValueOnce([secondUser]);
+    const results = await Promise.all([
+      getOrCreateUser("user_test"),
+      getOrCreateUser("user_second"),
+    ]);
+    expect(results).toEqual([storedUser, secondUser]);
+    expect(mocks.select).toHaveBeenCalledTimes(2);
+  });
+
+  it("removes failed pending lookups so the next request can retry", async () => {
+    mocks.limit.mockRejectedValueOnce(new Error("Temporary failure"));
+    await expect(getOrCreateUser("user_test")).rejects.toThrow(
+      "Temporary failure",
+    );
+    mocks.limit.mockResolvedValue([storedUser]);
+    await expect(getOrCreateUser("user_test")).resolves.toEqual(storedUser);
+    expect(mocks.select).toHaveBeenCalledTimes(2);
   });
 
   it.each(["", " ", "\n\t"])(
@@ -129,7 +176,7 @@ describe("getOrCreateUser", () => {
 
     await expect(getOrCreateUser("user_test")).rejects.toThrow("Insert failed");
 
-    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.select).toHaveBeenCalledTimes(1);
   });
 
   it("propagates lookup errors", async () => {

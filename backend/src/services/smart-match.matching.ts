@@ -7,6 +7,8 @@ export const RECENT_MATCH_DAYS = 7;
 export const FALLBACK_MATCH_DAYS = 30;
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const phrasePatterns = new Map<string, RegExp>();
+const MAX_PHRASE_PATTERNS = 512;
 
 export type JobWorkMode = "remote" | "hybrid" | "on-site" | "unknown";
 
@@ -172,10 +174,20 @@ function containsPhrase(
   // Rejects: "C" inside "C++" or "C#"
   const after = "(?=$|[^a-z0-9.+#]|\\.(?=$|[^a-z0-9.+#]))";
 
-  return new RegExp(
-    `${before}${escapeRegex(trimmed)}${after}`,
-    caseSensitive ? "" : "i",
-  ).test(searchable);
+  const patternKey = `${caseSensitive ? "exact" : "ignore-case"}:${trimmed}`;
+  let pattern = phrasePatterns.get(patternKey);
+  if (!pattern) {
+    pattern = new RegExp(
+      `${before}${escapeRegex(trimmed)}${after}`,
+      caseSensitive ? "" : "i",
+    );
+    if (phrasePatterns.size >= MAX_PHRASE_PATTERNS) {
+      const oldest = phrasePatterns.keys().next();
+      if (!oldest.done) phrasePatterns.delete(oldest.value);
+    }
+    phrasePatterns.set(patternKey, pattern);
+  }
+  return pattern.test(searchable);
 }
 
 function getSkillDefinition(value: string): SkillDefinition {
@@ -219,7 +231,11 @@ function isFoundational(label: string): boolean {
 }
 
 function descriptionText(job: DatabaseJob): string {
-  return normalizeJobDescription(job.description) ?? "";
+  const text = job.description ?? "";
+  // Imports already store plain text. Only legacy HTML needs conversion.
+  return /<\/?[a-z][^>]*>/i.test(text)
+    ? (normalizeJobDescription(text) ?? "")
+    : text.slice(0, 20_000);
 }
 
 function sortedValues(values: Set<string>): string[] {
@@ -697,124 +713,132 @@ export function rankMatchingJobs(
 
   const profileSkillSet = new Set(profileSkills);
 
-  const candidates = records
-    .filter((job) => {
-      const postedAt = Date.parse(job.postedAt);
+  const eligible = records.filter((job) => {
+    const postedAt = Date.parse(job.postedAt);
 
-      return (
-        job.isActive &&
-        Number.isFinite(postedAt) &&
-        postedAt >= fallbackCutoff &&
-        postedAt <= nowMs
-      );
-    })
-    .map((job) => {
-      const signals = analyzeListing(job, profile.skills);
+    return (
+      job.isActive &&
+      Number.isFinite(postedAt) &&
+      postedAt >= fallbackCutoff &&
+      postedAt <= nowMs
+    );
+  });
 
-      const allEvidence = new Set([
-        ...signals.requiredSkills,
-        ...signals.preferredSkills,
-        ...signals.mentionedSkills,
-        ...signals.metadataSkills,
-      ]);
+  function scoreCandidates(candidateRecords: DatabaseJob[]) {
+    return candidateRecords
+      .map((job) => {
+        const signals = analyzeListing(job, profile.skills);
 
-      const matchedSkills = profileSkills.filter((label) =>
-        allEvidence.has(label),
-      );
+        const allEvidence = new Set([
+          ...signals.requiredSkills,
+          ...signals.preferredSkills,
+          ...signals.mentionedSkills,
+          ...signals.metadataSkills,
+        ]);
 
-      const matchedRequiredSkills = signals.requiredSkills.filter((label) =>
-        profileSkillSet.has(label),
-      );
+        const matchedSkills = profileSkills.filter((label) =>
+          allEvidence.has(label),
+        );
 
-      const matchedPreferredSkills = signals.preferredSkills.filter((label) =>
-        profileSkillSet.has(label),
-      );
+        const matchedRequiredSkills = signals.requiredSkills.filter((label) =>
+          profileSkillSet.has(label),
+        );
 
-      const matchedMetadataSkills = signals.metadataSkills.filter((label) =>
-        profileSkillSet.has(label),
-      );
+        const matchedPreferredSkills = signals.preferredSkills.filter((label) =>
+          profileSkillSet.has(label),
+        );
 
-      const unconfirmedRequiredSkills = signals.requiredSkills.filter(
-        (label) => !profileSkillSet.has(label),
-      );
+        const matchedMetadataSkills = signals.metadataSkills.filter((label) =>
+          profileSkillSet.has(label),
+        );
 
-      const roleMatch = profile.roles.some((role) =>
-        matchesRole(job.title, role),
-      );
+        const unconfirmedRequiredSkills = signals.requiredSkills.filter(
+          (label) => !profileSkillSet.has(label),
+        );
 
-      const requiredCoreSkills = signals.requiredSkills.filter(
-        (label) => !isFoundational(label),
-      );
+        const roleMatch = profile.roles.some((role) =>
+          matchesRole(job.title, role),
+        );
 
-      const matchedRequiredCore = requiredCoreSkills.filter((label) =>
-        profileSkillSet.has(label),
-      );
+        const requiredCoreSkills = signals.requiredSkills.filter(
+          (label) => !isFoundational(label),
+        );
 
-      const clearEvidenceCount = new Set([
-        ...matchedRequiredSkills,
-        ...matchedPreferredSkills,
-        ...matchedMetadataSkills,
-      ]).size;
+        const matchedRequiredCore = requiredCoreSkills.filter((label) =>
+          profileSkillSet.has(label),
+        );
 
-      const mentionedCoreCount = matchedSkills.filter(
-        (label) =>
-          signals.mentionedSkills.includes(label) && !isFoundational(label),
-      ).length;
+        const clearEvidenceCount = new Set([
+          ...matchedRequiredSkills,
+          ...matchedPreferredSkills,
+          ...matchedMetadataSkills,
+        ]).size;
 
-      const qualifies =
-        matchedSkills.length > 0 &&
-        !conflictingRole(job.title, profile.roles) &&
-        !seniorityConflict(profile.experience, signals.seniority) &&
-        !preferredLocationConflict(profile, signals) &&
-        !(
-          profile.workMode !== "any" &&
-          signals.workMode !== "unknown" &&
-          signals.workMode !== profile.workMode
-        ) &&
-        (requiredCoreSkills.length === 0 || matchedRequiredCore.length > 0) &&
-        (clearEvidenceCount > 0 || mentionedCoreCount >= 2);
+        const mentionedCoreCount = matchedSkills.filter(
+          (label) =>
+            signals.mentionedSkills.includes(label) && !isFoundational(label),
+        ).length;
 
-      const overlapThreshold = Math.min(3, profileSkills.length);
+        const qualifies =
+          matchedSkills.length > 0 &&
+          !conflictingRole(job.title, profile.roles) &&
+          !seniorityConflict(profile.experience, signals.seniority) &&
+          !preferredLocationConflict(profile, signals) &&
+          !(
+            profile.workMode !== "any" &&
+            signals.workMode !== "unknown" &&
+            signals.workMode !== profile.workMode
+          ) &&
+          (requiredCoreSkills.length === 0 || matchedRequiredCore.length > 0) &&
+          (clearEvidenceCount > 0 || mentionedCoreCount >= 2);
 
-      const strength: "strong" | "partial" | "related" =
-        unconfirmedRequiredSkills.length === 0 &&
-        matchedSkills.length >= overlapThreshold &&
-        clearEvidenceCount > 0
-          ? "strong"
-          : "partial";
+        const overlapThreshold = Math.min(3, profileSkills.length);
 
-      const score =
-        matchedRequiredSkills.length * 12 +
-        matchedPreferredSkills.length * 6 +
-        matchedMetadataSkills.length * 5 +
-        mentionedCoreCount * 2 +
-        (roleMatch ? 8 : 0) +
-        (profile.workMode !== "any" && signals.workMode === profile.workMode
-          ? 4
-          : 0) -
-        unconfirmedRequiredSkills.length * 2;
+        const strength: "strong" | "partial" | "related" =
+          unconfirmedRequiredSkills.length === 0 &&
+          matchedSkills.length >= overlapThreshold &&
+          clearEvidenceCount > 0
+            ? "strong"
+            : "partial";
 
-      return {
-        job,
-        matchedSkills,
-        matchedRequiredSkills,
-        matchedPreferredSkills,
-        unconfirmedRequiredSkills,
-        roleMatch,
-        workMode: signals.workMode,
-        seniority: signals.seniority,
-        strength,
-        score,
-        qualifies,
-      };
-    })
-    .filter((match) => match.qualifies);
+        const score =
+          matchedRequiredSkills.length * 12 +
+          matchedPreferredSkills.length * 6 +
+          matchedMetadataSkills.length * 5 +
+          mentionedCoreCount * 2 +
+          (roleMatch ? 8 : 0) +
+          (profile.workMode !== "any" && signals.workMode === profile.workMode
+            ? 4
+            : 0) -
+          unconfirmedRequiredSkills.length * 2;
 
-  const recentMatches = candidates.filter(
-    (match) => Date.parse(match.job.postedAt) >= recentCutoff,
+        return {
+          job,
+          matchedSkills,
+          matchedRequiredSkills,
+          matchedPreferredSkills,
+          unconfirmedRequiredSkills,
+          roleMatch,
+          workMode: signals.workMode,
+          seniority: signals.seniority,
+          strength,
+          score,
+          qualifies,
+        };
+      })
+      .filter((match) => match.qualifies);
+  }
+
+  const recentMatches = scoreCandidates(
+    eligible.filter((job) => Date.parse(job.postedAt) >= recentCutoff),
   );
 
-  const selected = recentMatches.length > 0 ? recentMatches : candidates;
+  const selected =
+    recentMatches.length > 0
+      ? recentMatches
+      : scoreCandidates(
+          eligible.filter((job) => Date.parse(job.postedAt) < recentCutoff),
+        );
 
   return selected
     .sort(
