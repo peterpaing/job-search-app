@@ -6,6 +6,10 @@ import { db } from "../db/index.js";
 import { billingCustomers, billingEvents } from "../db/billing.schema.js";
 import { getOrCreateUser } from "./users.service.js";
 import { BillingError, getBillingConfig, getStripe } from "./billing.config.js";
+import {
+  getSandboxBillingClock,
+  sandboxBillingClockEnabled,
+} from "./billing.clock.js";
 
 type Customer = typeof billingCustomers.$inferSelect;
 
@@ -62,6 +66,7 @@ async function customerForUser(clerkUserId: string): Promise<Customer | null> {
 
 async function ensureCustomer(clerkUserId: string): Promise<Customer> {
   const existing = await customerForUser(clerkUserId);
+
   if (existing) return existing;
 
   const config = getBillingConfig();
@@ -102,6 +107,7 @@ async function withCustomerLock<T>(
 ): Promise<T> {
   const owner = randomUUID();
 
+  // Operational leases always use real database time.
   const lease = await db.execute(sql`
     UPDATE billing_customers
     SET sync_owner = ${owner}::uuid,
@@ -145,12 +151,14 @@ const invoiceLineSchema = z.object({
     })
     .nullable()
     .optional(),
+
   // Compatibility with older invoice line representations.
   price: z.unknown().optional(),
 });
 
 async function paidThrough(
   subscription: Stripe.Subscription,
+  nowSeconds: number,
 ): Promise<string | null> {
   const { priceId } = getBillingConfig();
   const item = subscription.items.data[0];
@@ -191,10 +199,11 @@ async function paidThrough(
   }
 
   let end = 0;
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowSeconds;
 
   for (const line of lines) {
     const parsed = invoiceLineSchema.safeParse(line);
+
     if (!parsed.success) continue;
 
     const value = parsed.data;
@@ -244,15 +253,22 @@ async function writeSnapshot(
   const config = getBillingConfig();
   const snapshots: Snapshot[] = [];
 
+  const clock =
+    subscriptions.length > 0 ? await getSandboxBillingClock(customerId) : null;
+
+  const nowSeconds = clock?.nowSeconds ?? Math.floor(Date.now() / 1000);
+
   for (const subscription of subscriptions) {
     if (
       objectId(subscription.customer) !== customerId ||
-      subscription.livemode !== config.livemode
+      subscription.livemode !== config.livemode ||
+      (clock !== null && objectId(subscription.test_clock) !== clock.id)
     ) {
       throw new BillingError(503, "Subscription verification failed.");
     }
 
-    const paidUntil = await paidThrough(subscription);
+    const paidUntil = await paidThrough(subscription, nowSeconds);
+
     const item = subscription.items.data[0];
 
     snapshots.push({
@@ -264,8 +280,9 @@ async function writeSnapshot(
         subscription.pause_collection === null &&
         paidUntil !== null,
       paid_until: paidUntil,
-      // Normalize both Stripe cancellation formats for our single-item plan.
-      // A cancellation beyond this period must not hide an upcoming renewal.
+
+      // Normalize both Stripe cancellation formats.
+      // A cancellation beyond this period must not hide renewal.
       cancel_at_period_end:
         subscription.cancel_at_period_end ||
         (subscription.items.data.length === 1 &&
@@ -305,14 +322,14 @@ export async function syncCustomer(
     )
     .limit(1);
 
-  // Ignore events for Stripe customers not created by this app.
+  // Ignore events for customers not mapped to this app.
   if (!customer) return;
 
   await withCustomerLock(customerId, async (owner) => {
     let subscriptions = await fetchSubscriptions(customerId);
 
     if (riskHold) {
-      // Suspend app access immediately, and stop future renewals.
+      // Suspend access and stop future renewals.
       for (const subscription of subscriptions) {
         if (
           ["active", "trialing", "past_due"].includes(subscription.status) &&
@@ -342,6 +359,23 @@ const statusRowSchema = z.object({
 export async function getBillingStatus(clerkUserId: string) {
   const config = getBillingConfig();
 
+  let accessTime = sql`now()`;
+
+  if (sandboxBillingClockEnabled()) {
+    // Resolve ownership using verified identity.
+    const customer = await customerForUser(clerkUserId);
+
+    if (customer) {
+      const clock = await getSandboxBillingClock(customer.stripeCustomerId);
+
+      if (clock) {
+        accessTime = sql`
+          to_timestamp(${clock.nowSeconds}::double precision)
+        `;
+      }
+    }
+  }
+
   const result = await db.execute(sql`
     SELECT
       (
@@ -349,7 +383,7 @@ export async function getBillingStatus(clerkUserId: string) {
         AND c.synced_at > now() - interval '48 hours'
         AND COALESCE(s.premium, false)
         AND s.price_id = ${config.priceId}
-        AND s.paid_until > now()
+        AND s.paid_until > ${accessTime}
       ) IS TRUE AS premium,
       c.risk_hold,
       s.status,
@@ -421,7 +455,9 @@ export async function createPortal(clerkUserId: string) {
     throw new BillingError(409, "You do not have a billing account yet.");
   }
 
-  return { url: await portalUrl(customer.stripeCustomerId) };
+  return {
+    url: await portalUrl(customer.stripeCustomerId),
+  };
 }
 
 export async function createCheckout(clerkUserId: string) {
@@ -467,7 +503,9 @@ export async function createCheckout(clerkUserId: string) {
     );
 
     if (existingSubscription) {
-      return { url: await portalUrl(customer.stripeCustomerId) };
+      return {
+        url: await portalUrl(customer.stripeCustomerId),
+      };
     }
 
     const [freshCustomer] = await db
@@ -490,6 +528,7 @@ export async function createCheckout(clerkUserId: string) {
       }
     }
 
+    // Checkout reservations always use real time.
     const reusable =
       freshCustomer.checkoutKey &&
       freshCustomer.checkoutExpiresAt &&
@@ -522,38 +561,40 @@ export async function createCheckout(clerkUserId: string) {
         mode: "subscription",
         customer: customer.stripeCustomerId,
         client_reference_id: customer.userId,
-
-        line_items: [{ price: config.priceId, quantity: 1 }],
-
+        line_items: [
+          {
+            price: config.priceId,
+            quantity: 1,
+          },
+        ],
         billing_address_collection: "required",
         customer_update: { address: "auto" },
-
-        automatic_tax: { enabled: config.automaticTax },
+        automatic_tax: {
+          enabled: config.automaticTax,
+        },
         allow_promotion_codes: false,
-
         subscription_data: {
           metadata: {
             stackwing_user_id: customer.userId,
             consent_version: "monthly-subscription-v1",
           },
         },
-
         expires_at: expiresAt,
-
         success_url:
           `${config.frontendOrigin}/billing` +
           "?checkout=success&session_id={CHECKOUT_SESSION_ID}",
-
-        cancel_url: `${config.frontendOrigin}/billing?checkout=cancelled`,
+        cancel_url: `${config.frontendOrigin}/billing` + "?checkout=cancelled",
       },
       {
-        idempotencyKey: `stackwing-checkout:${config.mode}:${checkoutKey}`,
+        idempotencyKey: `stackwing-checkout:${config.mode}:` + checkoutKey,
       },
     );
 
     await db
       .update(billingCustomers)
-      .set({ checkoutSessionId: session.id })
+      .set({
+        checkoutSessionId: session.id,
+      })
       .where(
         and(
           eq(billingCustomers.stripeCustomerId, customer.stripeCustomerId),
@@ -605,8 +646,7 @@ export async function confirmCheckout(clerkUserId: string, sessionId: string) {
     );
   }
 
-  // The browser's success URL does not grant access.
-  // Fetch the actual current subscription and paid invoice.
+  // A success URL alone must never grant access.
   await syncCustomer(customer.stripeCustomerId);
 
   return getBillingStatus(clerkUserId);
@@ -652,6 +692,7 @@ export async function handleBillingEvent(event: Stripe.Event) {
 
       if (chargeId) {
         const charge = await getStripe().charges.retrieve(chargeId);
+
         customerId = objectId(charge.customer);
         riskHold = true;
       }
@@ -694,6 +735,7 @@ export async function reconcileBilling() {
             checked += 1;
           } catch {
             failed += 1;
+
             console.error("Billing reconciliation failed", {
               customerId: customer.stripeCustomerId,
             });
@@ -705,7 +747,10 @@ export async function reconcileBilling() {
     cursor = customers[customers.length - 1]!.stripeCustomerId;
   }
 
-  console.log("Billing reconciliation complete", { checked, failed });
+  console.log("Billing reconciliation complete", {
+    checked,
+    failed,
+  });
 
   if (failed > 0) {
     throw new BillingError(503, "Some billing accounts could not synchronize.");

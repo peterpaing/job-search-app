@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   client: undefined as PGlite | undefined,
   pricesRetrieve: vi.fn(),
   customersCreate: vi.fn(),
+  customersRetrieve: vi.fn(),
+  testClocksRetrieve: vi.fn(),
   subscriptionsList: vi.fn(),
   subscriptionsUpdate: vi.fn(),
   invoiceLines: vi.fn(),
@@ -37,7 +39,7 @@ vi.mock("../../db/index.js", async () => {
   return { db: drizzle(client) };
 });
 
-// Keep real configuration validation, but replace every Stripe API call.
+// Keep real configuration validation, but mock all Stripe API calls.
 vi.mock("../../services/billing.config.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../services/billing.config.js")>();
@@ -45,13 +47,25 @@ vi.mock("../../services/billing.config.js", async (importOriginal) => {
   return {
     ...actual,
     getStripe: () => ({
-      prices: { retrieve: mocks.pricesRetrieve },
-      customers: { create: mocks.customersCreate },
+      prices: {
+        retrieve: mocks.pricesRetrieve,
+      },
+      customers: {
+        create: mocks.customersCreate,
+        retrieve: mocks.customersRetrieve,
+      },
+      testHelpers: {
+        testClocks: {
+          retrieve: mocks.testClocksRetrieve,
+        },
+      },
       subscriptions: {
         list: mocks.subscriptionsList,
         update: mocks.subscriptionsUpdate,
       },
-      invoices: { listLineItems: mocks.invoiceLines },
+      invoices: {
+        listLineItems: mocks.invoiceLines,
+      },
       checkout: {
         sessions: {
           create: mocks.checkoutCreate,
@@ -62,9 +76,13 @@ vi.mock("../../services/billing.config.js", async (importOriginal) => {
         configurations: {
           retrieve: mocks.portalConfiguration,
         },
-        sessions: { create: mocks.portalCreate },
+        sessions: {
+          create: mocks.portalCreate,
+        },
       },
-      charges: { retrieve: mocks.chargesRetrieve },
+      charges: {
+        retrieve: mocks.chargesRetrieve,
+      },
     }),
   };
 });
@@ -76,6 +94,7 @@ import {
   handleBillingEvent,
   refreshBilling,
 } from "../../services/billing.service.js";
+import { getSandboxBillingClock } from "../../services/billing.clock.js";
 
 const clerkId = "user_billing_test";
 const customerId = "cus_billing_test";
@@ -113,6 +132,7 @@ function subscription(
     object: "subscription",
     customer: options.customer ?? customerId,
     livemode: false,
+    test_clock: null,
     status: options.status ?? "active",
     pause_collection: null,
     cancel_at_period_end: options.cancelAtPeriodEnd ?? false,
@@ -154,7 +174,9 @@ function subscription(
 function event(
   id: string,
   type = "customer.subscription.updated",
-  object: Record<string, unknown> = { customer: customerId },
+  object: Record<string, unknown> = {
+    customer: customerId,
+  },
 ): Stripe.Event {
   return {
     id,
@@ -176,6 +198,54 @@ function completedCheckout(overrides: Record<string, unknown> = {}) {
     payment_status: "paid",
     ...overrides,
   };
+}
+
+function enableSandboxClock(nowSeconds: number) {
+  vi.stubEnv("BILLING_SANDBOX_CLOCK_ENABLED", "true");
+
+  mocks.customersRetrieve.mockResolvedValue({
+    id: customerId,
+    object: "customer",
+    deleted: false,
+    livemode: false,
+    test_clock: "clock_billing_test",
+  });
+
+  mocks.testClocksRetrieve.mockResolvedValue({
+    id: "clock_billing_test",
+    object: "test_helpers.test_clock",
+    livemode: false,
+    status: "ready",
+    frozen_time: nowSeconds,
+  });
+}
+
+function simulatedSubscription(
+  start: number,
+  end: number,
+  options: {
+    status?: Stripe.Subscription.Status;
+    paid?: boolean;
+    cancelAtPeriodEnd?: boolean;
+  } = {},
+) {
+  const value = subscription({
+    ...options,
+    end,
+  });
+
+  value.test_clock = "clock_billing_test";
+  value.items.data[0]!.current_period_start = start;
+
+  const invoice = value.latest_invoice;
+
+  if (!invoice || typeof invoice === "string") {
+    throw new Error("The test needs an expanded invoice.");
+  }
+
+  invoice.lines.data[0]!.period.start = start;
+
+  return value;
 }
 
 describe("Billing service with a temporary local database", () => {
@@ -206,6 +276,8 @@ describe("Billing service with a temporary local database", () => {
   beforeEach(async () => {
     vi.resetAllMocks();
 
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("BILLING_SANDBOX_CLOCK_ENABLED", "false");
     vi.stubEnv("BILLING_MODE", "test");
     vi.stubEnv("BILLING_LIVE_ENABLED", "false");
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_local_only");
@@ -215,6 +287,14 @@ describe("Billing service with a temporary local database", () => {
     vi.stubEnv("BILLING_AUTOMATIC_TAX", "false");
 
     subscriptions = [];
+
+    mocks.customersRetrieve.mockResolvedValue({
+      id: customerId,
+      object: "customer",
+      deleted: false,
+      livemode: false,
+      test_clock: null,
+    });
 
     mocks.subscriptionsList.mockImplementation(() => ({
       async *[Symbol.asyncIterator]() {
@@ -246,11 +326,15 @@ describe("Billing service with a temporary local database", () => {
           enabled: true,
           mode: "at_period_end",
         },
-        subscription_update: { enabled: false },
+        subscription_update: {
+          enabled: false,
+        },
       },
     });
 
-    mocks.portalCreate.mockResolvedValue({ url: portalUrl });
+    mocks.portalCreate.mockResolvedValue({
+      url: portalUrl,
+    });
 
     mocks.checkoutCreate.mockResolvedValue({
       id: "cs_test_open",
@@ -266,8 +350,14 @@ describe("Billing service with a temporary local database", () => {
 
     await database().exec("BEGIN");
 
-    const inserted = await database().query<{ id: string }>(
-      "INSERT INTO users (clerk_user_id) VALUES ($1) RETURNING id",
+    const inserted = await database().query<{
+      id: string;
+    }>(
+      `
+        INSERT INTO users (clerk_user_id)
+        VALUES ($1)
+        RETURNING id
+      `,
       [clerkId],
     );
 
@@ -330,7 +420,11 @@ describe("Billing service with a temporary local database", () => {
   });
 
   it("keeps paid access when cancellation is scheduled", async () => {
-    subscriptions = [subscription({ cancelAtPeriodEnd: true })];
+    subscriptions = [
+      subscription({
+        cancelAtPeriodEnd: true,
+      }),
+    ];
 
     const status = await refreshBilling(clerkId);
 
@@ -380,9 +474,11 @@ describe("Billing service with a temporary local database", () => {
     const renewedEnd = now + 60 * 86400;
 
     subscriptions = [subscription({ end: firstEnd })];
+
     const before = await refreshBilling(clerkId);
 
     subscriptions = [subscription({ end: renewedEnd })];
+
     await handleBillingEvent(event("evt_renewal", "invoice.paid"));
 
     const after = await getBillingStatus(clerkId);
@@ -425,9 +521,13 @@ describe("Billing service with a temporary local database", () => {
     const first = await createCheckout(clerkId);
     const second = await createCheckout(clerkId);
 
-    expect(first).toEqual({ url: checkoutUrl });
+    expect(first).toEqual({
+      url: checkoutUrl,
+    });
     expect(second).toEqual(first);
+
     expect(mocks.checkoutCreate).toHaveBeenCalledOnce();
+
     expect(mocks.checkoutRetrieve).toHaveBeenCalledWith("cs_test_open");
   });
 
@@ -439,7 +539,12 @@ describe("Billing service with a temporary local database", () => {
         customer: customerId,
         client_reference_id: userId,
         mode: "subscription",
-        line_items: [{ price: "price_pro_test", quantity: 1 }],
+        line_items: [
+          {
+            price: "price_pro_test",
+            quantity: 1,
+          },
+        ],
       }),
       expect.objectContaining({
         idempotencyKey: expect.stringMatching(/^stackwing-checkout:test:/),
@@ -467,12 +572,16 @@ describe("Billing service with a temporary local database", () => {
 
   it("rejects checkout confirmation for another customer", async () => {
     mocks.checkoutRetrieve.mockResolvedValue(
-      completedCheckout({ customer: "cus_someone_else" }),
+      completedCheckout({
+        customer: "cus_someone_else",
+      }),
     );
 
     await expect(
       confirmCheckout(clerkId, "cs_test_complete"),
-    ).rejects.toMatchObject({ status: 403 });
+    ).rejects.toMatchObject({
+      status: 403,
+    });
   });
 
   it("rejects checkout confirmation with another user reference", async () => {
@@ -484,21 +593,28 @@ describe("Billing service with a temporary local database", () => {
 
     await expect(
       confirmCheckout(clerkId, "cs_test_complete"),
-    ).rejects.toMatchObject({ status: 403 });
+    ).rejects.toMatchObject({
+      status: 403,
+    });
   });
 
   it("does not confirm an unpaid checkout", async () => {
     mocks.checkoutRetrieve.mockResolvedValue(
-      completedCheckout({ payment_status: "unpaid" }),
+      completedCheckout({
+        payment_status: "unpaid",
+      }),
     );
 
     await expect(
       confirmCheckout(clerkId, "cs_test_complete"),
-    ).rejects.toMatchObject({ status: 409 });
+    ).rejects.toMatchObject({
+      status: 409,
+    });
   });
 
   it("checks the subscription invoice even after a paid checkout", async () => {
     mocks.checkoutRetrieve.mockResolvedValue(completedCheckout());
+
     subscriptions = [subscription({ paid: false })];
 
     const status = await confirmCheckout(clerkId, "cs_test_complete");
@@ -508,6 +624,7 @@ describe("Billing service with a temporary local database", () => {
 
   it("grants access after verified checkout and subscription payment", async () => {
     mocks.checkoutRetrieve.mockResolvedValue(completedCheckout());
+
     subscriptions = [subscription()];
 
     const status = await confirmCheckout(clerkId, "cs_test_complete");
@@ -517,6 +634,7 @@ describe("Billing service with a temporary local database", () => {
 
   it("processes the same webhook only once", async () => {
     subscriptions = [subscription()];
+
     const notification = event("evt_duplicate", "invoice.paid");
 
     await handleBillingEvent(notification);
@@ -524,7 +642,9 @@ describe("Billing service with a temporary local database", () => {
 
     expect(mocks.subscriptionsList).toHaveBeenCalledOnce();
 
-    const result = await database().query<{ count: number }>(
+    const result = await database().query<{
+      count: number;
+    }>(
       `
         SELECT count(*)::integer AS count
         FROM billing_events
@@ -553,13 +673,19 @@ describe("Billing service with a temporary local database", () => {
   });
 
   it("does not mark a failed webhook as processed", async () => {
-    subscriptions = [subscription({ customer: "cus_wrong_customer" })];
+    subscriptions = [
+      subscription({
+        customer: "cus_wrong_customer",
+      }),
+    ];
 
     await expect(handleBillingEvent(event("evt_retry"))).rejects.toMatchObject({
       status: 503,
     });
 
-    const result = await database().query<{ count: number }>(
+    const result = await database().query<{
+      count: number;
+    }>(
       `
         SELECT count(*)::integer AS count
         FROM billing_events
@@ -585,6 +711,308 @@ describe("Billing service with a temporary local database", () => {
 
   it("does not grant access while the account has a risk hold", async () => {
     subscriptions = [subscription()];
+    await refreshBilling(clerkId);
+
+    await database().exec(`
+      UPDATE billing_customers
+      SET risk_hold = true
+    `);
+
+    const status = await getBillingStatus(clerkId);
+
+    expect(status.blocked).toBe(true);
+    expect(status.premium).toBe(false);
+  });
+
+  it("does not retrieve a clock when sandbox clock support is disabled", async () => {
+    await expect(getSandboxBillingClock(customerId)).resolves.toBeNull();
+
+    expect(mocks.customersRetrieve).not.toHaveBeenCalled();
+
+    expect(mocks.testClocksRetrieve).not.toHaveBeenCalled();
+  });
+
+  it("does not use simulated time in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("BILLING_SANDBOX_CLOCK_ENABLED", "true");
+
+    await expect(getSandboxBillingClock(customerId)).resolves.toBeNull();
+
+    expect(mocks.customersRetrieve).not.toHaveBeenCalled();
+
+    expect(mocks.testClocksRetrieve).not.toHaveBeenCalled();
+  });
+
+  it("does not use simulated time in live billing", async () => {
+    vi.stubEnv("BILLING_MODE", "live");
+    vi.stubEnv("BILLING_LIVE_ENABLED", "true");
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_local_test_only");
+    vi.stubEnv("FRONTEND_ORIGIN", "https://example.com");
+    vi.stubEnv("BILLING_SANDBOX_CLOCK_ENABLED", "true");
+
+    await expect(getSandboxBillingClock(customerId)).resolves.toBeNull();
+
+    expect(mocks.customersRetrieve).not.toHaveBeenCalled();
+
+    expect(mocks.testClocksRetrieve).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordinary test customers on real time", async () => {
+    vi.stubEnv("BILLING_SANDBOX_CLOCK_ENABLED", "true");
+
+    subscriptions = [subscription()];
+
+    const status = await refreshBilling(clerkId);
+
+    expect(status.premium).toBe(true);
+
+    expect(mocks.testClocksRetrieve).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unverified customer returned by Stripe", async () => {
+    enableSandboxClock(Math.floor(Date.now() / 1000));
+
+    mocks.customersRetrieve.mockResolvedValue({
+      id: "cus_someone_else",
+      livemode: false,
+      test_clock: "clock_billing_test",
+    });
+
+    await expect(getSandboxBillingClock(customerId)).rejects.toMatchObject({
+      status: 503,
+    });
+
+    expect(mocks.testClocksRetrieve).not.toHaveBeenCalled();
+  });
+
+  it("rejects a deleted sandbox customer", async () => {
+    enableSandboxClock(Math.floor(Date.now() / 1000));
+
+    mocks.customersRetrieve.mockResolvedValue({
+      id: customerId,
+      object: "customer",
+      deleted: true,
+    });
+
+    await expect(getSandboxBillingClock(customerId)).rejects.toMatchObject({
+      status: 503,
+    });
+
+    expect(mocks.testClocksRetrieve).not.toHaveBeenCalled();
+  });
+
+  it("rejects a live customer returned during sandbox testing", async () => {
+    enableSandboxClock(Math.floor(Date.now() / 1000));
+
+    mocks.customersRetrieve.mockResolvedValue({
+      id: customerId,
+      livemode: true,
+      test_clock: "clock_billing_test",
+    });
+
+    await expect(getSandboxBillingClock(customerId)).rejects.toMatchObject({
+      status: 503,
+    });
+  });
+
+  it("rejects a clock with invalid simulated time", async () => {
+    enableSandboxClock(Math.floor(Date.now() / 1000));
+
+    mocks.testClocksRetrieve.mockResolvedValue({
+      id: "clock_billing_test",
+      livemode: false,
+      status: "ready",
+      frozen_time: -1,
+    });
+
+    await expect(getSandboxBillingClock(customerId)).rejects.toMatchObject({
+      status: 503,
+    });
+  });
+
+  it("waits until the simulation clock is ready", async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    enableSandboxClock(now);
+
+    mocks.testClocksRetrieve.mockResolvedValue({
+      id: "clock_billing_test",
+      livemode: false,
+      status: "advancing",
+      frozen_time: now,
+    });
+
+    await expect(getSandboxBillingClock(customerId)).rejects.toMatchObject({
+      status: 503,
+    });
+  });
+
+  it("rejects a subscription attached to a different clock", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const start = now + 30 * 86400;
+    const end = now + 60 * 86400;
+
+    enableSandboxClock(start + 86400);
+
+    const value = simulatedSubscription(start, end);
+
+    value.test_clock = "clock_someone_else";
+    subscriptions = [value];
+
+    await expect(refreshBilling(clerkId)).rejects.toMatchObject({
+      status: 503,
+    });
+  });
+
+  it("does not grant a future paid period when clock support is disabled", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const start = now + 30 * 86400;
+    const end = now + 60 * 86400;
+
+    subscriptions = [simulatedSubscription(start, end)];
+
+    const status = await refreshBilling(clerkId);
+
+    expect(status.premium).toBe(false);
+
+    expect(mocks.customersRetrieve).not.toHaveBeenCalled();
+  });
+
+  it("grants access after a paid renewal in simulated future time", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const start = now + 30 * 86400;
+    const end = now + 60 * 86400;
+
+    enableSandboxClock(start + 86400);
+
+    subscriptions = [simulatedSubscription(start, end)];
+
+    await handleBillingEvent(event("evt_clock_renewal", "invoice.paid"));
+
+    const status = await getBillingStatus(clerkId);
+
+    expect(status.premium).toBe(true);
+    expect(status.status).toBe("active");
+    expect(status.paidUntil).toBe(new Date(end * 1000).toISOString());
+  });
+
+  it("removes access after a failed simulated renewal", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const start = now + 30 * 86400;
+    const end = now + 60 * 86400;
+
+    enableSandboxClock(start + 86400);
+
+    subscriptions = [simulatedSubscription(start, end)];
+
+    expect((await refreshBilling(clerkId)).premium).toBe(true);
+
+    enableSandboxClock(end + 86400);
+
+    subscriptions = [
+      simulatedSubscription(end, end + 30 * 86400, {
+        status: "past_due",
+        paid: false,
+      }),
+    ];
+
+    await handleBillingEvent(
+      event("evt_clock_failed", "invoice.payment_failed"),
+    );
+
+    const status = await getBillingStatus(clerkId);
+
+    expect(status.status).toBe("past_due");
+    expect(status.premium).toBe(false);
+  });
+
+  it("keeps access before cancellation expiry and removes it afterward", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const start = now + 30 * 86400;
+    const end = now + 60 * 86400;
+
+    enableSandboxClock(start + 86400);
+
+    subscriptions = [
+      simulatedSubscription(start, end, {
+        cancelAtPeriodEnd: true,
+      }),
+    ];
+
+    const before = await refreshBilling(clerkId);
+
+    expect(before.premium).toBe(true);
+    expect(before.cancelAtPeriodEnd).toBe(true);
+
+    enableSandboxClock(end + 1);
+
+    // The access check must expire the stored paid period
+    // even before another webhook updates the snapshot.
+    expect((await getBillingStatus(clerkId)).premium).toBe(false);
+
+    subscriptions = [
+      simulatedSubscription(start, end, {
+        status: "canceled",
+        cancelAtPeriodEnd: true,
+      }),
+    ];
+
+    await handleBillingEvent(
+      event("evt_clock_canceled", "customer.subscription.deleted"),
+    );
+
+    const after = await getBillingStatus(clerkId);
+
+    expect(after.status).toBe("canceled");
+    expect(after.premium).toBe(false);
+  });
+
+  it("still checks snapshot freshness using real database time", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const start = now + 30 * 86400;
+    const end = now + 60 * 86400;
+
+    enableSandboxClock(start + 86400);
+
+    subscriptions = [simulatedSubscription(start, end)];
+
+    expect((await refreshBilling(clerkId)).premium).toBe(true);
+
+    await database().exec(`
+      UPDATE billing_customers
+      SET synced_at = now() - interval '49 hours'
+    `);
+
+    expect((await getBillingStatus(clerkId)).premium).toBe(false);
+  });
+
+  it("does not bypass real billing locks with simulated future time", async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    enableSandboxClock(now + 31 * 86400);
+
+    await database().exec(`
+      UPDATE billing_customers
+      SET sync_owner = gen_random_uuid(),
+          sync_until = now() + interval '2 minutes'
+    `);
+
+    await expect(createCheckout(clerkId)).rejects.toMatchObject({
+      status: 409,
+    });
+
+    expect(mocks.checkoutCreate).not.toHaveBeenCalled();
+  });
+
+  it("does not bypass risk holds in simulated time", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const start = now + 30 * 86400;
+    const end = now + 60 * 86400;
+
+    enableSandboxClock(start + 86400);
+
+    subscriptions = [simulatedSubscription(start, end)];
+
     await refreshBilling(clerkId);
 
     await database().exec(`
