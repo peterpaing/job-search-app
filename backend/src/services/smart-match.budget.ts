@@ -11,6 +11,11 @@ import {
   type reservationFor,
 } from "./smart-match.costs.js";
 
+import {
+  getOwnerClerkUserId,
+  isOwnerDatabaseUserId,
+} from "./smart-match.owner.js";
+
 const resultSchema = z.object({
   status: z.string(),
 
@@ -51,10 +56,13 @@ export async function reserveBudget(
   kind: "extract" | "answer",
   reservation: ReturnType<typeof reservationFor>,
 ) {
-  const limits = getCostLimits();
+  const limits = {
+    ...getCostLimits(),
+    ownerClerkUserId: getOwnerClerkUserId(),
+  };
 
   const response = await db.execute(sql`
-    SELECT smart_match_reserve_costs(
+    SELECT smart_match_reserve_costs_with_owner(
       ${userId}::uuid,
       ${leaseId}::uuid,
       ${kind},
@@ -146,6 +154,7 @@ const usageRow = z.object({
 export async function usageFor(userId: string) {
   const periods = utcPeriods();
   const limits = getCostLimits();
+  const ownerAccess = await isOwnerDatabaseUserId(userId);
 
   const result = await db.execute(sql`
     SELECT
@@ -182,6 +191,7 @@ export async function usageFor(userId: string) {
 
   return {
     // Existing frontend fields remain compatible.
+    ownerAccess,
     used: day?.requests ?? 0,
     limit: limits.dailyRequests,
 

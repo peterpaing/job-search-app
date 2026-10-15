@@ -55,6 +55,7 @@ function result(status = "ok", alerts: unknown[] = []) {
 beforeEach(() => {
   vi.resetAllMocks();
 
+  vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "");
   vi.stubEnv("SMARTMATCH_USER_DAILY_LIMIT", "20");
   vi.stubEnv("SMARTMATCH_USER_MONTHLY_LIMIT", "100");
   vi.stubEnv("SMARTMATCH_USER_DAILY_TOKEN_LIMIT", "50000");
@@ -78,7 +79,7 @@ describe("SmartMatch budget reservations", () => {
 
     const query = lastQuery();
 
-    expect(query.sql).toContain("smart_match_reserve_costs");
+    expect(query.sql).toContain("smart_match_reserve_costs_with_owner");
 
     expect(query.params.slice(0, 7)).toEqual([
       userId,
@@ -98,6 +99,7 @@ describe("SmartMatch budget reservations", () => {
       userMonthlyMicro: 500_000,
       globalDailyMicro: 5_000_000,
       globalMonthlyMicro: 150_000_000,
+      ownerClerkUserId: null,
     });
   });
 
@@ -180,6 +182,64 @@ describe("SmartMatch budget reservations", () => {
       reserveBudget(userId, leaseId, "answer", reservation),
     ).rejects.toThrow("Missing budget result");
   });
+
+  it("passes the configured owner ID without removing global limits", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_owner");
+
+    await reserveBudget(userId, leaseId, "answer", reservation);
+
+    const query = lastQuery();
+
+    expect(query.sql).toContain("smart_match_reserve_costs_with_owner");
+
+    expect(JSON.parse(query.params[7] as string)).toMatchObject({
+      ownerClerkUserId: "user_owner",
+      dailyRequests: 20,
+      monthlyRequests: 100,
+      dailyTokens: 50_000,
+      monthlyTokens: 500_000,
+      userMonthlyMicro: 500_000,
+      globalDailyMicro: 5_000_000,
+      globalMonthlyMicro: 150_000_000,
+    });
+
+    expect(mocks.execute).toHaveBeenCalledOnce();
+  });
+
+  it("does not pass malformed owner configuration to the database", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "invalid-owner");
+
+    await reserveBudget(userId, leaseId, "answer", reservation);
+
+    expect(JSON.parse(lastQuery().params[7] as string)).toMatchObject({
+      ownerClerkUserId: null,
+    });
+  });
+
+  it.each(["daily_budget", "monthly_budget"])(
+    "preserves %s rejection when owner access is configured",
+    async (status) => {
+      vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_owner");
+      mocks.execute.mockResolvedValue(result(status));
+
+      await expect(
+        reserveBudget(userId, leaseId, "answer", reservation),
+      ).rejects.toMatchObject({
+        status: 429,
+      });
+    },
+  );
+
+  it("preserves busy protection when owner access is configured", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_owner");
+    mocks.execute.mockResolvedValue(result("busy"));
+
+    await expect(
+      reserveBudget(userId, leaseId, "answer", reservation),
+    ).rejects.toMatchObject({
+      status: 409,
+    });
+  });
 });
 
 describe("SmartMatch budget settlement", () => {
@@ -195,7 +255,6 @@ describe("SmartMatch budget settlement", () => {
     const query = lastQuery();
 
     expect(query.sql).toContain("smart_match_settle_costs");
-
     expect(query.params).toEqual([leaseId, 3000, 2000, 600, 1560]);
   });
 
@@ -221,6 +280,19 @@ describe("SmartMatch budget settlement", () => {
       "Missing AI cost reservation",
     );
   });
+
+  it("still settles usage when owner access is configured", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_owner");
+
+    await settleBudget(leaseId, {
+      input_tokens: 3000,
+      output_tokens: 600,
+    });
+
+    expect(lastQuery().sql).toContain("smart_match_settle_costs");
+    expect(lastQuery().params).toEqual([leaseId, 3000, 0, 600, 2160]);
+    expect(mocks.execute).toHaveBeenCalledOnce();
+  });
 });
 
 describe("SmartMatch usage summaries", () => {
@@ -232,6 +304,7 @@ describe("SmartMatch usage summaries", () => {
     const usage = await usageFor(userId);
 
     expect(usage).toMatchObject({
+      ownerAccess: false,
       used: 0,
       limit: 20,
       remaining: 20,
@@ -249,6 +322,7 @@ describe("SmartMatch usage summaries", () => {
     });
 
     expect(lastQuery().params).toContain(`user:${userId}`);
+    expect(mocks.execute).toHaveBeenCalledOnce();
   });
 
   it("handles PostgreSQL bigint strings and limits daily remaining by monthly remaining", async () => {
@@ -280,6 +354,7 @@ describe("SmartMatch usage summaries", () => {
     });
 
     expect(await usageFor(userId)).toMatchObject({
+      ownerAccess: false,
       used: 5,
       limit: 20,
       remaining: 2,
@@ -320,5 +395,98 @@ describe("SmartMatch usage summaries", () => {
     await usageFor("user-b");
     expect(lastQuery().params).toContain("user:user-b");
     expect(lastQuery().params).not.toContain("user:user-a");
+  });
+
+  it("recognizes the owner through the database user mapping", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_owner");
+
+    mocks.execute
+      .mockResolvedValueOnce({
+        rows: [{ is_owner: true }],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            period_kind: "month",
+            requests: "150",
+            committed_tokens: "600000",
+            input_tokens: "500000",
+            cached_tokens: "10000",
+            output_tokens: "100000",
+            measured_micro: "400000",
+            committed_micro: "600000",
+            unresolved_requests: "2",
+          },
+        ],
+      });
+
+    const usage = await usageFor(userId);
+
+    expect(usage).toMatchObject({
+      ownerAccess: true,
+      monthly: {
+        used: 150,
+      },
+      tokens: {
+        monthly: {
+          committed: 600000,
+        },
+      },
+      spending: {
+        measuredUsd: 0.4,
+        committedUsd: 0.6,
+        unresolvedRequests: 2,
+      },
+    });
+
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+
+    const ownerQuery = dialect.sqlToQuery(
+      mocks.execute.mock.calls[0]![0] as SQL,
+    );
+
+    expect(ownerQuery.sql).toContain("clerk_user_id");
+    expect(ownerQuery.params).toEqual([userId, "user_owner"]);
+    expect(lastQuery().params).toContain(`user:${userId}`);
+  });
+
+  it("does not mark other database users as owners", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_owner");
+
+    mocks.execute
+      .mockResolvedValueOnce({
+        rows: [{ is_owner: false }],
+      })
+      .mockResolvedValueOnce({
+        rows: [],
+      });
+
+    const usage = await usageFor(userId);
+
+    expect(usage.ownerAccess).toBe(false);
+    expect(usage.remaining).toBe(20);
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed when the owner lookup has no matching result", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_owner");
+
+    mocks.execute
+      .mockResolvedValueOnce({
+        rows: [],
+      })
+      .mockResolvedValueOnce({
+        rows: [],
+      });
+
+    expect((await usageFor(userId)).ownerAccess).toBe(false);
+  });
+
+  it("does not invent owner access when the lookup fails", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_owner");
+
+    mocks.execute.mockRejectedValueOnce(new Error("Database unavailable"));
+
+    await expect(usageFor(userId)).rejects.toThrow("Database unavailable");
   });
 });

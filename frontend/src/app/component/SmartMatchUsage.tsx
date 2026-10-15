@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { FiChevronDown, FiRefreshCw, FiZap } from "react-icons/fi";
 
 export type SmartMatchUsageData = {
+  ownerAccess?: boolean;
   used: number;
   limit: number;
   remaining: number;
@@ -124,7 +125,7 @@ function TokenAllowance({
   );
 }
 
-export default function SmartMatchUsage({
+function LimitedSmartMatchUsage({
   usage,
   onRefresh,
   refreshDisabled = false,
@@ -198,8 +199,7 @@ export default function SmartMatchUsage({
         return;
       }
 
-      // Page or ancestor scrolling changes the anchor's position.
-      // Close instead of increasing the panel's height.
+      // Close when page scrolling changes the anchor's position.
       setExpanded(false);
     }
 
@@ -220,15 +220,12 @@ export default function SmartMatchUsage({
 
     return () => {
       document.removeEventListener("keydown", handleEscape, true);
-
       document.removeEventListener("pointerdown", handleOutsidePointer);
 
       window.removeEventListener("scroll", handleScroll, true);
-
       window.removeEventListener("resize", handleViewportChange);
 
       viewport?.removeEventListener("resize", handleViewportChange);
-
       viewport?.removeEventListener("scroll", handleViewportChange);
     };
   }, [expanded]);
@@ -383,4 +380,107 @@ export default function SmartMatchUsage({
       </aside>
     </div>
   );
+}
+
+function OwnerSmartMatchUsage({
+  usage,
+  onRefresh,
+  refreshDisabled = false,
+}: SmartMatchUsageProps) {
+  const monthlyTokens = usage.tokens?.monthly.committed ?? 0;
+  const measuredUsd = usage.spending?.measuredUsd ?? 0;
+
+  const reservedUsd = Math.max(
+    0,
+    (usage.spending?.committedUsd ?? 0) - measuredUsd,
+  );
+
+  const money = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  });
+
+  return (
+    <aside
+      aria-label="AI usage allowance"
+      className="border-border bg-surface w-full rounded-2xl border p-4 sm:max-w-sm"
+    >
+      <p
+        role="status"
+        aria-atomic="true"
+        className="text-primary text-sm font-semibold"
+      >
+        Owner access · No personal limit
+      </p>
+
+      <p className="text-muted mt-2 text-xs leading-relaxed">
+        Usage is still recorded. Global spending safeguards and request-size
+        limits still apply.
+      </p>
+
+      <dl className="mt-4 space-y-3 text-xs">
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-muted">Requests today</dt>
+          <dd className="text-primary tabular-nums">
+            {usage.used.toLocaleString("en-US")}
+          </dd>
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-muted">Requests this month</dt>
+          <dd className="text-primary tabular-nums">
+            {(usage.monthly?.used ?? 0).toLocaleString("en-US")}
+          </dd>
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-muted">Tokens accounted for this month</dt>
+          <dd className="text-primary tabular-nums">
+            {monthlyTokens.toLocaleString("en-US")}
+          </dd>
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-muted">Measured AI cost this month</dt>
+          <dd className="text-primary tabular-nums">
+            {money.format(measuredUsd)}
+          </dd>
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-muted">Reserved or unconfirmed cost</dt>
+          <dd className="text-primary tabular-nums">
+            {money.format(reservedUsd)}
+          </dd>
+        </div>
+      </dl>
+
+      <p className="text-muted mt-3 text-xs leading-relaxed">
+        Cost figures are app estimates, not your provider invoice. Historical
+        reservations may lack token counts.
+      </p>
+
+      {onRefresh && (
+        <button
+          type="button"
+          disabled={refreshDisabled}
+          onClick={onRefresh}
+          className="border-border text-primary focus-visible:outline-primary hover:bg-background mt-4 inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <FiRefreshCw aria-hidden="true" className="h-3.5 w-3.5" />
+          Refresh usage
+        </button>
+      )}
+    </aside>
+  );
+}
+
+export default function SmartMatchUsage(props: SmartMatchUsageProps) {
+  if (props.usage.ownerAccess === true) {
+    return <OwnerSmartMatchUsage {...props} />;
+  }
+
+  return <LimitedSmartMatchUsage {...props} />;
 }
