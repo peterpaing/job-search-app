@@ -60,7 +60,8 @@ export function createSmartMatchRouter(frontendOrigin: string) {
       const config = getSmartMatchConfig();
       const clerkUserId = res.locals.clerkUserId as string;
 
-      const { hasPremium } = await import("../services/billing.service.js");
+      const { hasSmartMatchAccess: hasPremium } =
+        await import("../services/smart-match.owner.js");
 
       const access = {
         premium: await hasPremium(clerkUserId),
@@ -94,7 +95,8 @@ export function createSmartMatchRouter(frontendOrigin: string) {
   router.get("/access", async (_req, res, next) => {
     try {
       const config = getSmartMatchConfig();
-      const { hasPremium } = await import("../services/billing.service.js");
+      const { hasSmartMatchAccess: hasPremium } =
+        await import("../services/smart-match.owner.js");
 
       res.json({
         premium: await hasPremium(res.locals.clerkUserId as string),
@@ -108,7 +110,8 @@ export function createSmartMatchRouter(frontendOrigin: string) {
 
   router.use(async (_req, res, next) => {
     try {
-      const { hasPremium } = await import("../services/billing.service.js");
+      const { hasSmartMatchAccess: hasPremium } =
+        await import("../services/smart-match.owner.js");
 
       if (!(await hasPremium(res.locals.clerkUserId as string))) {
         res.status(403).json({

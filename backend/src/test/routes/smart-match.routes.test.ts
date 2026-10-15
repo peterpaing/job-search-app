@@ -62,6 +62,7 @@ describe("SmartMatch routes", () => {
   beforeEach(() => {
     vi.resetAllMocks();
 
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "");
     vi.stubEnv("SMARTMATCH_AI_ENABLED", "false");
     vi.stubEnv("SMARTMATCH_USER_DAILY_LIMIT", "20");
     vi.stubEnv("SMARTMATCH_DAILY_BUDGET_CENTS", "500");
@@ -82,13 +83,16 @@ describe("SmartMatch routes", () => {
 
     mocks.storeProfile.mockResolvedValue({ profile });
     mocks.getJobs.mockResolvedValue({ matches: [], searched: 0 });
+
     mocks.bootstrap.mockResolvedValue({
       profile,
       usage: {},
       matches: [],
       searched: 0,
     });
+
     mocks.extract.mockResolvedValue({ draft: profile });
+
     mocks.answer.mockResolvedValue({
       answer: "Review the React requirements.",
       cached: false,
@@ -284,5 +288,115 @@ describe("SmartMatch routes", () => {
 
     expect(result.status).toBe(500);
     expect(result.body.message).not.toContain("credentials");
+  });
+
+  it("grants the verified owner access without paid billing", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_verified");
+    mocks.hasPremium.mockResolvedValue(false);
+
+    const result = await request(app).get("/api/smart-match/access");
+
+    expect(result.status).toBe(200);
+    expect(result.body.premium).toBe(true);
+    expect(result.headers["cache-control"]).toBe("no-store");
+    expect(mocks.hasPremium).not.toHaveBeenCalled();
+  });
+
+  it("allows the owner to bootstrap without paid billing", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_verified");
+    mocks.hasPremium.mockResolvedValue(false);
+
+    const result = await request(app).get("/api/smart-match/bootstrap");
+
+    expect(result.status).toBe(200);
+    expect(result.body.access.premium).toBe(true);
+    expect(mocks.bootstrap).toHaveBeenCalledWith("user_verified");
+    expect(mocks.hasPremium).not.toHaveBeenCalled();
+  });
+
+  it("allows the owner through the protected profile middleware", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_verified");
+    mocks.hasPremium.mockResolvedValue(false);
+
+    const result = await request(app).get("/api/smart-match/profile");
+
+    expect(result.status).toBe(200);
+    expect(mocks.getState).toHaveBeenCalledWith("user_verified");
+    expect(mocks.hasPremium).not.toHaveBeenCalled();
+  });
+
+  it("does not accept a query-supplied owner identity", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_owner");
+    mocks.hasPremium.mockResolvedValue(false);
+
+    const result = await request(app).get(
+      "/api/smart-match/access?userId=user_owner&owner=true",
+    );
+
+    expect(result.status).toBe(200);
+    expect(result.body.premium).toBe(false);
+    expect(mocks.hasPremium).toHaveBeenCalledWith("user_verified");
+  });
+
+  it("does not bootstrap a non-owner who supplies the owner ID", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_owner");
+    mocks.hasPremium.mockResolvedValue(false);
+
+    const result = await request(app).get(
+      "/api/smart-match/bootstrap?userId=user_owner&owner=true",
+    );
+
+    expect(result.status).toBe(200);
+    expect(result.body.access.premium).toBe(false);
+    expect(mocks.bootstrap).not.toHaveBeenCalled();
+  });
+
+  it("still requires authentication for an owner-supplied query", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_owner");
+
+    mocks.getAuth.mockReturnValue({
+      isAuthenticated: false,
+      userId: null,
+    });
+
+    const result = await request(app).get(
+      "/api/smart-match/access?userId=user_owner",
+    );
+
+    expect(result.status).toBe(401);
+    expect(mocks.hasPremium).not.toHaveBeenCalled();
+  });
+
+  it("does not grant owner access for malformed configuration", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "not-a-clerk-user");
+    mocks.hasPremium.mockResolvedValue(false);
+
+    const result = await request(app).get("/api/smart-match/access");
+
+    expect(result.status).toBe(200);
+    expect(result.body.premium).toBe(false);
+    expect(mocks.hasPremium).toHaveBeenCalledWith("user_verified");
+  });
+
+  it("preserves global-budget errors for the owner", async () => {
+    vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "user_verified");
+    mocks.hasPremium.mockResolvedValue(false);
+
+    mocks.answer.mockRejectedValue(
+      new SmartMatchError(
+        429,
+        "AI has reached today’s service budget. Try again tomorrow.",
+      ),
+    );
+
+    const result = await request(app)
+      .post("/api/smart-match/ask")
+      .send({ jobId: "job-a", question: "Explain my fit." });
+
+    expect(result.status).toBe(429);
+    expect(result.body.message).toBe(
+      "AI has reached today’s service budget. Try again tomorrow.",
+    );
+    expect(mocks.hasPremium).not.toHaveBeenCalled();
   });
 });

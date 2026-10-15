@@ -107,7 +107,6 @@ describe("SmartMatchUsage", () => {
     ).toBe(card);
 
     expect(card.parentElement).toBe(wrapper);
-
     expect(card).toHaveClass("absolute", "top-0");
     expect(card).not.toHaveClass("fixed");
 
@@ -122,7 +121,6 @@ describe("SmartMatchUsage", () => {
     ).toBeInTheDocument();
 
     expect(screen.getAllByText("Monthly AI allowance")).toHaveLength(1);
-
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -238,7 +236,7 @@ describe("SmartMatchUsage", () => {
     expect(outside).toHaveFocus();
   });
 
-  it("does not show internal spending values", async () => {
+  it("does not show internal spending values to regular users", async () => {
     const user = userEvent.setup();
 
     render(<SmartMatchUsage usage={usage} />);
@@ -250,8 +248,11 @@ describe("SmartMatchUsage", () => {
     );
 
     expect(screen.queryByText("$0.50")).not.toBeInTheDocument();
-
     expect(screen.queryByText("$0.05")).not.toBeInTheDocument();
+
+    expect(
+      screen.queryByText("Measured AI cost this month"),
+    ).not.toBeInTheDocument();
   });
 
   it("explains unconfirmed reservations", async () => {
@@ -399,5 +400,158 @@ describe("SmartMatchUsage", () => {
     expect(
       screen.getByText("Monthly token allowance reached."),
     ).toBeInTheDocument();
+  });
+
+  it("shows owner access without personal allowance warnings", () => {
+    render(
+      <SmartMatchUsage
+        usage={{
+          ...usage,
+          ownerAccess: true,
+          remaining: 0,
+          monthly: {
+            used: 150,
+            limit: 100,
+            remaining: 0,
+            resetsAt: "2026-11-01T00:00:00.000Z",
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Owner access · No personal limit",
+    );
+
+    expect(screen.getByText(/Global spending safeguards/)).toBeInTheDocument();
+
+    expect(
+      screen.queryByText(/Your new-request allowance is used up/),
+    ).not.toBeInTheDocument();
+
+    expect(screen.queryByText("Monthly AI allowance")).not.toBeInTheDocument();
+
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("shows tracked request, token, and cost values for the owner", () => {
+    render(<SmartMatchUsage usage={{ ...usage, ownerAccess: true }} />);
+
+    const requestRow = screen.getByText("Requests today").parentElement!;
+    const monthlyRow = screen.getByText("Requests this month").parentElement!;
+    const tokenRow = screen.getByText(
+      "Tokens accounted for this month",
+    ).parentElement!;
+
+    expect(within(requestRow).getByText("3")).toBeInTheDocument();
+    expect(within(monthlyRow).getByText("30")).toBeInTheDocument();
+    expect(within(tokenRow).getByText("100,000")).toBeInTheDocument();
+
+    expect(screen.getByText("$0.0500")).toBeInTheDocument();
+    expect(screen.getByText("$0.0100")).toBeInTheDocument();
+
+    expect(
+      screen.getByText(/Cost figures are app estimates/),
+    ).toBeInTheDocument();
+  });
+
+  it("never displays a negative owner reservation estimate", () => {
+    render(
+      <SmartMatchUsage
+        usage={{
+          ...usage,
+          ownerAccess: true,
+          spending: {
+            measuredUsd: 0.07,
+            committedUsd: 0.06,
+            monthlyLimitUsd: 0.5,
+            unresolvedRequests: 0,
+          },
+        }}
+      />,
+    );
+
+    const reservedRow = screen.getByText(
+      "Reserved or unconfirmed cost",
+    ).parentElement!;
+
+    expect(within(reservedRow).getByText("$0.0000")).toBeInTheDocument();
+  });
+
+  it("refreshes owner usage only on click", async () => {
+    const user = userEvent.setup();
+    const refresh = vi.fn();
+
+    render(
+      <SmartMatchUsage
+        usage={{ ...usage, ownerAccess: true }}
+        onRefresh={refresh}
+      />,
+    );
+
+    expect(refresh).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Refresh usage",
+      }),
+    );
+
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("disables owner refresh while busy", async () => {
+    const user = userEvent.setup();
+    const refresh = vi.fn();
+
+    render(
+      <SmartMatchUsage
+        usage={{ ...usage, ownerAccess: true }}
+        onRefresh={refresh}
+        refreshDisabled
+      />,
+    );
+
+    const button = screen.getByRole("button", {
+      name: "Refresh usage",
+    });
+
+    expect(button).toBeDisabled();
+
+    await user.click(button);
+
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("shows regular allowances when owner access is false", () => {
+    render(<SmartMatchUsage usage={{ ...usage, ownerAccess: false }} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "70 / 100 AI requests left this month",
+    );
+
+    expect(
+      screen.queryByText("Owner access · No personal limit"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("switches between owner and regular views when usage changes", () => {
+    const { rerender } = render(
+      <SmartMatchUsage usage={{ ...usage, ownerAccess: true }} />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Owner access · No personal limit",
+    );
+
+    rerender(<SmartMatchUsage usage={{ ...usage, ownerAccess: false }} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "70 / 100 AI requests left this month",
+    );
+
+    expect(
+      screen.queryByText("Measured AI cost this month"),
+    ).not.toBeInTheDocument();
   });
 });
