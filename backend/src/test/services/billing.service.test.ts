@@ -262,6 +262,8 @@ describe("Billing service with a temporary local database", () => {
       "0007_job-availability.sql",
       "0008_premium-billing.sql",
       "0009_premium-billing-functions.sql",
+      "0010_owner-access.sql",
+      "0011_account-deletion.sql",
     ];
 
     for (const name of migrations) {

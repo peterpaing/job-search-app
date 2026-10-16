@@ -17,7 +17,10 @@ vi.mock("@clerk/express", () => ({
 vi.mock("../../services/users.service.js", () => ({
   getOrCreateUser: mocks.getOrCreateUser,
 }));
-
+vi.mock("../../services/account-deletion.state.js", () => ({
+  assertAccountActive: vi.fn(async () => undefined),
+  AccountDeletionError: class AccountDeletionError extends Error {},
+}));
 import { createUsersRouter } from "../../routes/users.routes.js";
 
 const app = express();

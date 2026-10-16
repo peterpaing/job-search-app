@@ -6,6 +6,7 @@ import { createSavedJobsRouter } from "./routes/saved-jobs.routes.js";
 import { createApplicationsRouter } from "./routes/applications.routes.js";
 import { createSmartMatchRouter } from "./routes/smart-match.routes.js";
 import { createBillingRouter, stripeWebhook } from "./routes/billing.routes.js";
+import { createAccountDeletionRouter } from "./routes/account-deletion.routes.js";
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.post(
 );
 
 app.use(express.json({ limit: "100kb" }));
+app.use("/api/account", createAccountDeletionRouter(frontendOrigin));
 
 app.use("/api", router);
 app.use("/api/users", createUsersRouter(frontendOrigin));

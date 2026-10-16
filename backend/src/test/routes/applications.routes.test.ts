@@ -24,6 +24,11 @@ vi.mock("../../services/applications.service.js", () => ({
   removeApplication: mocks.removeApplication,
 }));
 
+vi.mock("../../services/account-deletion.state.js", () => ({
+  assertAccountActive: vi.fn(async () => undefined),
+  AccountDeletionError: class AccountDeletionError extends Error {},
+}));
+
 const application = {
   id: "application-a",
   jobId: "job-a",

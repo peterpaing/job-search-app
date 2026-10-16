@@ -5,12 +5,15 @@ import AccountSync from "../../app/component/AccountSync";
 
 const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
+  useClerk: vi.fn(),
+  signOut: vi.fn(),
   getToken: vi.fn(),
   fetch: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs", () => ({
   useAuth: mocks.useAuth,
+  useClerk: mocks.useClerk,
 }));
 
 const errorMessage =
@@ -48,6 +51,12 @@ function combineSignals(signals: AbortSignal[]) {
 describe("AccountSync", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mocks.signOut.mockResolvedValue(undefined);
+
+    mocks.useClerk.mockReturnValue({
+      session: { id: "session_test" },
+      signOut: mocks.signOut,
+    });
 
     timeoutController = new AbortController();
 

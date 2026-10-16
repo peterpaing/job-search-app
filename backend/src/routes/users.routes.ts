@@ -1,5 +1,6 @@
 import { Router, type ErrorRequestHandler } from "express";
 import { clerkMiddleware, getAuth } from "@clerk/express";
+import { accountDeletionGuard } from "../middleware/account-deletion.middleware.js";
 
 export function createUsersRouter(frontendOrigin: string) {
   const router = Router();
@@ -14,6 +15,8 @@ export function createUsersRouter(frontendOrigin: string) {
       authorizedParties: [frontendOrigin],
     }),
   );
+
+  router.use(accountDeletionGuard);
 
   router.post("/me", async (req, res, next) => {
     try {

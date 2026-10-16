@@ -28,6 +28,11 @@ vi.mock("../../services/billing.service.js", () => ({
   handleBillingEvent: mocks.handleBillingEvent,
 }));
 
+vi.mock("../../services/account-deletion.state.js", () => ({
+  assertAccountActive: vi.fn(async () => undefined),
+  AccountDeletionError: class AccountDeletionError extends Error {},
+}));
+
 import {
   createBillingRouter,
   stripeWebhook,

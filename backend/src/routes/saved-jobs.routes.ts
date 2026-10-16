@@ -1,6 +1,7 @@
 import { clerkMiddleware, getAuth } from "@clerk/express";
 import { Router, type ErrorRequestHandler } from "express";
 import { z } from "zod";
+import { accountDeletionGuard } from "../middleware/account-deletion.middleware.js";
 
 const jobIdSchema = z.string().trim().min(1).max(512);
 
@@ -17,6 +18,8 @@ export function createSavedJobsRouter(frontendOrigin: string) {
       authorizedParties: [frontendOrigin],
     }),
   );
+
+  router.use(accountDeletionGuard);
 
   router.use((req, res, next) => {
     try {

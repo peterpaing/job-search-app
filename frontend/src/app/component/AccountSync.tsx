@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
+import { useAuth, useClerk } from "@clerk/nextjs";
 import { useEffect, useState } from "react";
 import { FiAlertCircle, FiRefreshCw, FiX } from "react-icons/fi";
 
@@ -10,6 +10,7 @@ type SyncError = {
 };
 
 export default function AccountSync() {
+  const clerk = useClerk();
   const { isLoaded, isSignedIn, userId, sessionId, getToken } = useAuth();
 
   const [syncError, setSyncError] = useState<SyncError | null>(null);
@@ -55,7 +56,34 @@ export default function AccountSync() {
             AbortSignal.timeout(10_000),
           ]),
         });
+        if (cancelled) {
+          return;
+        }
 
+        if (response.status === 410) {
+          setSyncError(null);
+
+          if (clerk.session?.id !== activeSessionId) {
+            return;
+          }
+
+          try {
+            await clerk.signOut({
+              sessionId: activeSessionId,
+            });
+          } catch {
+            // The deleted account's session may already be gone.
+          }
+
+          if (
+            !cancelled &&
+            (!clerk.session || clerk.session.id === activeSessionId)
+          ) {
+            window.location.replace(new URL("/", window.location.origin).href);
+          }
+
+          return;
+        }
         if (!response.ok) {
           throw new Error(`Account sync failed: ${response.status}`);
         }
@@ -82,7 +110,7 @@ export default function AccountSync() {
       cancelled = true;
       controller.abort();
     };
-  }, [isLoaded, isSignedIn, userId, sessionId, getToken, retryCount]);
+  }, [isLoaded, isSignedIn, userId, sessionId, getToken, retryCount, clerk]);
 
   if (
     !isLoaded ||
@@ -97,7 +125,7 @@ export default function AccountSync() {
   return (
     <div
       role="alert"
-      className="border-border bg-background fixed top-4 right-4 left-4 z-40 mx-auto max-w-sm rounded-2xl border p-4 shadow-lg sm:left-auto sm:mx-0"
+      className="border-border bg-background fixed right-4 bottom-4 left-4 z-[60] mx-auto max-w-sm rounded-2xl border p-4 shadow-lg sm:left-auto sm:mx-0"
     >
       <div className="flex items-start gap-3">
         <div

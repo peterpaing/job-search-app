@@ -15,6 +15,7 @@ import {
   getSandboxBillingClock,
   sandboxBillingClockEnabled,
 } from "./billing.clock.js";
+import { isUserDeletionRequested } from "./account-deletion.state.js";
 
 type Customer = typeof billingCustomers.$inferSelect;
 
@@ -112,20 +113,15 @@ async function withCustomerLock<T>(
 ): Promise<T> {
   const owner = randomUUID();
 
-  // Operational leases always use real database time.
   const lease = await db.execute(sql`
-    UPDATE billing_customers
-    SET sync_owner = ${owner}::uuid,
-        sync_until = clock_timestamp() + interval '2 minutes'
-    WHERE stripe_customer_id = ${customerId}
-      AND (
-        sync_until IS NULL
-        OR sync_until <= clock_timestamp()
-      )
-    RETURNING stripe_customer_id
+    SELECT account_deletion_take_billing_lock(
+      ${customerId},
+      ${owner}::uuid,
+      false
+    ) AS acquired
   `);
 
-  if (lease.rows.length === 0) {
+  if (lease.rows[0]?.acquired !== true) {
     throw new BillingBusyError();
   }
 
@@ -327,6 +323,26 @@ export async function syncCustomer(
   // Ignore events for customers not mapped to this app.
   if (!customer) return;
 
+  if (await isUserDeletionRequested(customer.userId)) {
+    const { stopAccountBillingForCustomer } =
+      await import("./account-deletion.service.js");
+
+    // Handle late billing events without restoring deleted-account access.
+    // Acknowledge the event only after billing shutdown succeeds.
+    await stopAccountBillingForCustomer(customer);
+
+    if (eventId) {
+      await db
+        .insert(billingEvents)
+        .values({
+          stripeEventId: eventId,
+          livemode: config.livemode,
+        })
+        .onConflictDoNothing();
+    }
+
+    return;
+  }
   await withCustomerLock(customerId, async (owner) => {
     let subscriptions = await fetchSubscriptions(customerId);
 
@@ -492,9 +508,9 @@ export async function createPortal(clerkUserId: string) {
     throw new BillingError(409, "You do not have a billing account yet.");
   }
 
-  return {
+  return withCustomerLock(customer.stripeCustomerId, async () => ({
     url: await portalUrl(customer.stripeCustomerId),
-  };
+  }));
 }
 
 export async function createCheckout(clerkUserId: string) {
