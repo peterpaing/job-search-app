@@ -22,6 +22,11 @@ vi.mock("../../services/saved-jobs.service.js", () => ({
   unsaveJob: mocks.unsaveJob,
 }));
 
+vi.mock("../../services/account-deletion.state.js", () => ({
+  assertAccountActive: vi.fn(async () => undefined),
+  AccountDeletionError: class AccountDeletionError extends Error {},
+}));
+
 import { createSavedJobsRouter } from "../../routes/saved-jobs.routes.js";
 
 const app = express();

@@ -7,6 +7,7 @@ import {
   BillingError,
   verifyStripeEvent,
 } from "../services/billing.config.js";
+import { accountDeletionGuard } from "../middleware/account-deletion.middleware.js";
 
 // Five processing attempts, with four short waits.
 // Only lock contention is retried inside this request.
@@ -101,6 +102,7 @@ export function createBillingRouter(frontendOrigin: string) {
       authorizedParties: [frontendOrigin],
     }),
   );
+  router.use(accountDeletionGuard);
 
   router.use((req, res, next) => {
     try {

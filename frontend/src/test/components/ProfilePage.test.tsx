@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,8 +10,18 @@ const mocks = vi.hoisted(() => ({
   userProfile: vi.fn(),
   signOutOptions: vi.fn(),
   signOutClick: vi.fn(),
+  clerkSignOut: vi.fn(),
+  getToken: vi.fn(),
+  fetch: vi.fn(),
+  routerReplace: vi.fn(),
+  routerRefresh: vi.fn(),
 }));
-
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    replace: mocks.routerReplace,
+    refresh: mocks.routerRefresh,
+  }),
+}));
 vi.mock("@clerk/nextjs", () => {
   function MockUserProfile({
     children,
@@ -45,6 +55,21 @@ vi.mock("@clerk/nextjs", () => {
 
   return {
     useUser: mocks.useUser,
+
+    useClerk: () => ({
+      user: {
+        id: "user_profile_test",
+      },
+      session: {
+        id: "session_profile_test",
+        getToken: mocks.getToken,
+      },
+      signOut: mocks.clerkSignOut,
+    }),
+
+    // These component tests do not exercise Clerk's real
+    // reverification UI or backend verification.
+    useReverification: (fetcher: unknown) => fetcher,
 
     SignIn: (props: unknown) => {
       mocks.signIn(props);
@@ -81,8 +106,20 @@ function renderSignedInProfile() {
 
 describe("ProfilePage", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+
     vi.stubEnv("NEXT_PUBLIC_SUPPORT_EMAIL", "");
+    vi.stubEnv("NEXT_PUBLIC_ACCOUNT_DELETION_ENABLED", "false");
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://localhost:5000");
+
+    vi.stubGlobal("fetch", mocks.fetch);
+
+    mocks.fetch.mockRejectedValue(
+      new Error("Unexpected network request in ProfilePage test"),
+    );
+
+    mocks.getToken.mockResolvedValue("local-test-token");
+    mocks.clerkSignOut.mockResolvedValue(undefined);
 
     mocks.useUser.mockReturnValue({
       isLoaded: true,
@@ -92,6 +129,7 @@ describe("ProfilePage", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it("shows loading while Clerk initializes", () => {
@@ -237,41 +275,40 @@ describe("ProfilePage", () => {
       name: "Privacy",
     });
 
-    expect(
-      within(privacy).getByRole("heading", {
-        name: "Account information",
-      }),
-    ).toBeInTheDocument();
-
-    expect(
-      within(privacy).getByRole("heading", {
-        name: "Profile visibility",
-      }),
-    ).toBeInTheDocument();
-
-    expect(
-      within(privacy).getByRole("heading", {
-        name: "Job browsing",
-      }),
-    ).toBeInTheDocument();
+    for (const title of [
+      "Account information",
+      "Profile visibility",
+      "Job browsing",
+      "Payments and subscriptions",
+    ]) {
+      expect(
+        within(privacy).getByRole("heading", { name: title }),
+      ).toBeInTheDocument();
+    }
   });
 
-  it("shows all support categories", () => {
+  it("shows support categories in the requested order", () => {
     renderSignedInProfile();
 
     const help = screen.getByRole("region", {
       name: "Help & feedback",
     });
 
-    for (const title of [
-      "Broken job link",
-      "Report a bug",
+    const headings = within(help).getAllByRole("heading", {
+      level: 3,
+    });
+
+    expect(headings.map((heading) => heading.textContent)).toEqual([
       "Subscription issue",
-    ]) {
-      expect(
-        within(help).getByRole("heading", { name: title }),
-      ).toBeInTheDocument();
-    }
+      "AI issue",
+      "Report a bug",
+    ]);
+
+    expect(
+      within(help).queryByRole("heading", {
+        name: "Broken job link",
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it("does not create support links without a configured email", () => {
@@ -288,7 +325,7 @@ describe("ProfilePage", () => {
     ).toBeInTheDocument();
   });
 
-  it("creates support emails with the correct address and subjects", () => {
+  it("creates Gmail drafts with the correct recipient and subjects", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPPORT_EMAIL", "  support@example.com  ");
 
     renderSignedInProfile();
@@ -300,21 +337,31 @@ describe("ProfilePage", () => {
     expect(links).toHaveLength(3);
 
     const subjects = [
-      "StackWing: Broken job link",
-      "StackWing: Report a bug",
       "StackWing: Subscription issue",
+      "StackWing: AI issue",
+      "StackWing: Report a bug",
     ];
 
     links.forEach((link, index) => {
-      const url = new URL(link.getAttribute("href")!);
+      const href = link.getAttribute("href");
 
-      expect(url.protocol).toBe("mailto:");
-      expect(url.pathname).toBe("support@example.com");
+      expect(href).not.toBeNull();
 
-      expect(url.searchParams.get("subject")).toBe(subjects[index]);
+      const url = new URL(href!);
 
+      expect(url.protocol).toBe("https:");
+      expect(url.hostname).toBe("mail.google.com");
+      expect(url.pathname).toBe("/mail/");
+      expect(url.searchParams.get("tf")).toBe("cm");
+      expect(url.searchParams.get("to")).toBe("support@example.com");
+      expect(url.searchParams.get("su")).toBe(subjects[index]);
       expect(url.searchParams.get("body")).toContain("Details:");
+
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
     });
+
+    expect(mocks.fetch).not.toHaveBeenCalled();
   });
 
   it("treats a whitespace-only support email as unconfigured", () => {
@@ -329,20 +376,165 @@ describe("ProfilePage", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps account deletion disabled until the backend is connected", () => {
+  it("keeps account deletion disabled when the feature flag is off", () => {
     renderSignedInProfile();
 
+    const deletion = screen.getByRole("region", {
+      name: "Delete account",
+    });
+
     expect(
-      screen.getByRole("button", {
-        name: "Delete account — unavailable",
+      within(deletion).getByRole("heading", {
+        name: "Permanently delete your account",
       }),
+    ).toBeInTheDocument();
+
+    expect(
+      within(deletion).getByLabelText("Type DELETE to confirm"),
     ).toBeDisabled();
 
     expect(
-      screen.getByRole("heading", {
-        name: "Account deletion is not connected yet",
+      within(deletion).getByRole("button", {
+        name: "Delete account",
       }),
-    ).toBeInTheDocument();
+    ).toBeDisabled();
+
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it("requires the exact DELETE confirmation when enabled", async () => {
+    vi.stubEnv("NEXT_PUBLIC_ACCOUNT_DELETION_ENABLED", "true");
+
+    const user = userEvent.setup();
+    renderSignedInProfile();
+
+    const deletion = screen.getByRole("region", {
+      name: "Delete account",
+    });
+
+    const input = within(deletion).getByLabelText("Type DELETE to confirm");
+
+    const button = within(deletion).getByRole("button", {
+      name: "Delete account",
+    });
+
+    expect(button).toBeDisabled();
+
+    await user.type(input, "delete");
+    expect(button).toBeDisabled();
+
+    await user.clear(input);
+    await user.type(input, "DELETE");
+
+    expect(button).toBeEnabled();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it("submits confirmation and signs out after a queued response", async () => {
+    vi.stubEnv("NEXT_PUBLIC_ACCOUNT_DELETION_ENABLED", "true");
+
+    mocks.fetch.mockResolvedValue(
+      new Response(JSON.stringify({ status: "pending" }), {
+        status: 202,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderSignedInProfile();
+
+    const deletion = screen.getByRole("region", {
+      name: "Delete account",
+    });
+
+    await user.type(
+      within(deletion).getByLabelText("Type DELETE to confirm"),
+      "DELETE",
+    );
+
+    await user.click(
+      within(deletion).getByRole("button", {
+        name: "Delete account",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.clerkSignOut).toHaveBeenCalledWith({
+        sessionId: "session_profile_test",
+      });
+    });
+
+    expect(mocks.getToken).toHaveBeenCalledWith({
+      skipCache: true,
+    });
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+
+    const [url, options] = mocks.fetch.mock.calls[0];
+
+    expect(String(url)).toBe("http://localhost:5000/api/account/deletion");
+
+    expect(options).toEqual(
+      expect.objectContaining({
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          Authorization: "Bearer local-test-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          confirmation: "DELETE",
+        }),
+      }),
+    );
+
+    expect(within(deletion).getByRole("status")).toHaveTextContent(
+      "Your deletion request is saved.",
+    );
+  });
+
+  it("shows a rejected deletion request without signing out", async () => {
+    vi.stubEnv("NEXT_PUBLIC_ACCOUNT_DELETION_ENABLED", "true");
+
+    mocks.fetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          message: "An AI or billing request is still running.",
+        }),
+        {
+          status: 409,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderSignedInProfile();
+
+    const deletion = screen.getByRole("region", {
+      name: "Delete account",
+    });
+
+    await user.type(
+      within(deletion).getByLabelText("Type DELETE to confirm"),
+      "DELETE",
+    );
+
+    await user.click(
+      within(deletion).getByRole("button", {
+        name: "Delete account",
+      }),
+    );
+
+    expect(await within(deletion).findByRole("alert")).toHaveTextContent(
+      "An AI or billing request is still running.",
+    );
+
+    expect(mocks.clerkSignOut).not.toHaveBeenCalled();
   });
 
   it("places sign-out inside the panel and delegates to Clerk", async () => {
@@ -386,7 +578,6 @@ describe("ProfilePage", () => {
     const { container } = renderSignedInProfile();
 
     expect(container).toHaveTextContent("StackWing");
-
     expect(container.textContent).not.toMatch(/Dev Jobs|DVjobs/i);
   });
 });

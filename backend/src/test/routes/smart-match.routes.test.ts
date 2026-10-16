@@ -37,6 +37,11 @@ vi.mock("../../services/smart-match-bootstrap.service.js", () => ({
   getSmartMatchBootstrap: mocks.bootstrap,
 }));
 
+vi.mock("../../services/account-deletion.state.js", () => ({
+  assertAccountActive: vi.fn(async () => undefined),
+  AccountDeletionError: class AccountDeletionError extends Error {},
+}));
+
 const app = express();
 app.use(express.json());
 app.use("/api/smart-match", createSmartMatchRouter("http://localhost:3000"));

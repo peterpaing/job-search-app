@@ -7,6 +7,7 @@ import {
   profileSchema,
 } from "../services/smart-match.logic.js";
 import { BillingError } from "../services/billing.config.js";
+import { accountDeletionGuard } from "../middleware/account-deletion.middleware.js";
 
 const extractSchema = z
   .object({
@@ -35,7 +36,7 @@ export function createSmartMatchRouter(frontendOrigin: string) {
       authorizedParties: [frontendOrigin],
     }),
   );
-
+  router.use(accountDeletionGuard);
   router.use((req, res, next) => {
     try {
       const auth = getAuth(req, {

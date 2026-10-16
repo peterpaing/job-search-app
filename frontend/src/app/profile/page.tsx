@@ -1,8 +1,16 @@
 "use client";
 
-import { SignIn, SignOutButton, UserProfile, useUser } from "@clerk/nextjs";
+import {
+  SignIn,
+  SignOutButton,
+  UserProfile,
+  useClerk,
+  useReverification,
+  useUser,
+} from "@clerk/nextjs";
+import { isReverificationCancelledError } from "@clerk/nextjs/errors";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   HiOutlineArrowRight,
   HiOutlineArrowRightOnRectangle,
@@ -128,16 +136,17 @@ function HelpAndFeedback() {
 
   const issues = [
     {
-      title: "Broken job link",
-      description: "Include the job title, company, and job link.",
+      title: "Subscription issue",
+      description: "Describe the billing issue. Never include payment details.",
+    },
+    {
+      title: "AI issue",
+      description:
+        "Describe what went wrong with SmartMatch and include any error message. Never include sensitive personal information.",
     },
     {
       title: "Report a bug",
       description: "Describe what happened and the steps to reproduce it.",
-    },
-    {
-      title: "Subscription issue",
-      description: "Describe the billing issue. Never include payment details.",
     },
   ];
 
@@ -160,11 +169,14 @@ function HelpAndFeedback() {
 
             {supportEmail && (
               <a
-                href={`mailto:${supportEmail}?subject=${encodeURIComponent(
-                  `StackWing: ${issue.title}`,
-                )}&body=${encodeURIComponent(
-                  `${issue.description}\n\nDetails:\n`,
-                )}`}
+                href={`https://mail.google.com/mail/?${new URLSearchParams({
+                  tf: "cm",
+                  to: supportEmail,
+                  su: `StackWing: ${issue.title}`,
+                  body: `${issue.description}\n\nDetails:\n`,
+                }).toString()}`}
+                target="_blank"
+                rel="noopener noreferrer"
                 className={`${buttonClass} mt-4`}
               >
                 Email support
@@ -175,7 +187,7 @@ function HelpAndFeedback() {
 
         <p className="text-muted text-xs leading-relaxed">
           {supportEmail
-            ? "Email support opens your email app. Your report is sent only when you send the email."
+            ? "Email support opens Gmail in a new tab. Your report is sent only when you send the email."
             : "Support contact details have not been configured yet."}
         </p>
       </div>
@@ -184,30 +196,253 @@ function HelpAndFeedback() {
 }
 
 function DeleteAccount() {
+  const clerk = useClerk();
+
+  const confirmationId = useId();
+
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [accepted, setAccepted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const mounted = useRef(false);
+  const pending = useRef(false);
+
+  const enabled = process.env.NEXT_PUBLIC_ACCOUNT_DELETION_ENABLED === "true";
+
+  useEffect(() => {
+    mounted.current = true;
+
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const submitDeletion = useReverification(
+    async (
+      expectedUserId: string,
+      expectedSessionId: string,
+    ): Promise<unknown> => {
+      const session = clerk.session;
+
+      function ensureCurrent() {
+        if (
+          !mounted.current ||
+          clerk.user?.id !== expectedUserId ||
+          clerk.session?.id !== expectedSessionId
+        ) {
+          throw new Error("Your account changed. Please try again.");
+        }
+      }
+
+      ensureCurrent();
+
+      if (!session || session.id !== expectedSessionId) {
+        throw new Error("Please sign in again.");
+      }
+
+      // Obtain a fresh token after any reverification prompt.
+      const token = await session.getToken({ skipCache: true });
+      ensureCurrent();
+
+      if (!token) {
+        throw new Error("Please sign in again.");
+      }
+
+      const response = await fetch(
+        new URL(
+          "/api/account/deletion",
+          process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5000",
+        ),
+        {
+          method: "POST",
+          cache: "no-store",
+          signal: AbortSignal.timeout(30_000),
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ confirmation: "DELETE" }),
+        },
+      );
+
+      const result: unknown = await response.json();
+      ensureCurrent();
+
+      // Return Clerk's hint unchanged so the hook can open verification.
+      if (
+        response.status === 403 &&
+        typeof result === "object" &&
+        result !== null &&
+        "clerk_error" in result
+      ) {
+        return result;
+      }
+
+      if (!response.ok) {
+        const message =
+          typeof result === "object" &&
+          result !== null &&
+          "message" in result &&
+          typeof result.message === "string"
+            ? result.message
+            : "Unable to confirm your deletion request. Please try again.";
+
+        throw new Error(message);
+      }
+
+      return result;
+    },
+  );
+
+  async function deleteAccount() {
+    if (!enabled || pending.current || accepted || confirmation !== "DELETE") {
+      return;
+    }
+
+    const expectedUserId = clerk.user?.id;
+    const expectedSessionId = clerk.session?.id;
+
+    if (!expectedUserId || !expectedSessionId) {
+      setError("Please sign in again.");
+      return;
+    }
+
+    pending.current = true;
+    setBusy(true);
+    setError(null);
+
+    try {
+      const result = await submitDeletion(expectedUserId, expectedSessionId);
+
+      if (!result) return;
+
+      if (
+        typeof result !== "object" ||
+        !("status" in result) ||
+        (result.status !== "pending" && result.status !== "completed")
+      ) {
+        throw new Error(
+          "Unable to confirm your deletion request. Please try again.",
+        );
+      }
+
+      if (
+        !mounted.current ||
+        clerk.user?.id !== expectedUserId ||
+        clerk.session?.id !== expectedSessionId
+      ) {
+        return;
+      }
+
+      setAccepted(true);
+
+      try {
+        sessionStorage.removeItem(
+          `dev-jobs:pending-application-visits:v2:user:${encodeURIComponent(
+            expectedUserId,
+          )}`,
+        );
+      } catch {
+        // Storage restrictions must not cancel a saved deletion request.
+      }
+
+      try {
+        await clerk.signOut({
+          sessionId: expectedSessionId,
+        });
+      } catch {
+        // The cleanup worker may already have removed this session.
+      } finally {
+        // Do not interrupt a different account selected during deletion.
+        if (!clerk.session || clerk.session.id === expectedSessionId) {
+          window.location.replace(new URL("/", window.location.origin).href);
+        }
+      }
+    } catch (failure) {
+      if (mounted.current && !isReverificationCancelledError(failure)) {
+        setError(
+          failure instanceof Error && failure.name !== "TimeoutError"
+            ? failure.message
+            : "Unable to confirm the request. It may already be queued. Please try again.",
+        );
+      }
+    } finally {
+      pending.current = false;
+
+      if (mounted.current) {
+        setBusy(false);
+      }
+    }
+  }
+
   return (
     <AccountSection
       title="Delete account"
-      description="Permanently remove your account and its associated app data."
+      description="Permanently remove your sign-in account and private app data."
     >
-      <div className="rounded-2xl border border-red-200 bg-red-50 p-5 sm:p-6">
+      <form
+        className="rounded-2xl border border-red-200 bg-red-50 p-5 sm:p-6"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void deleteAccount();
+        }}
+      >
         <h3 className="text-sm font-semibold text-red-800">
-          Account deletion is not connected yet
+          Permanently delete your account
         </h3>
 
         <p className="mt-2 text-sm leading-relaxed text-red-800">
-          We need a secure backend flow that removes your StackWing data and
-          your Clerk account together. Deleting only the Clerk account would not
-          automatically remove data stored in our database.
+          This removes your saved jobs, applications, SmartMatch profile, and
+          cached answers. Pro access ends when deletion is requested. Your
+          subscription will be canceled without an automatic refund.
         </p>
 
+        <p className="mt-3 text-sm leading-relaxed text-red-800">
+          Deletion may continue after you sign out. Billing cancellation is
+          confirmed before your sign-in account is deleted. Limited billing and
+          AI accounting records are retained separately.
+        </p>
+
+        <label
+          htmlFor={confirmationId}
+          className="mt-5 block text-sm font-medium text-red-800"
+        >
+          Type DELETE to confirm
+        </label>
+
+        <input
+          id={confirmationId}
+          type="text"
+          value={confirmation}
+          onChange={(event) => setConfirmation(event.target.value)}
+          autoComplete="off"
+          spellCheck={false}
+          disabled={!enabled || busy || accepted}
+          className="mt-2 block w-full max-w-sm rounded-xl border border-red-200 bg-white px-3 py-2.5 text-sm text-red-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:opacity-50"
+        />
+
+        {error && (
+          <p role="alert" className="mt-3 text-sm text-red-800">
+            {error}
+          </p>
+        )}
+
+        {accepted && (
+          <p role="status" className="mt-3 text-sm text-red-800">
+            Your deletion request is saved. Cleanup will continue after you sign
+            out.
+          </p>
+        )}
+
         <button
-          type="button"
-          disabled
+          type="submit"
+          disabled={!enabled || busy || accepted || confirmation !== "DELETE"}
           className="mt-5 rounded-full bg-red-700 px-5 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Delete account — unavailable
+          {busy ? "Requesting deletion…" : "Delete account"}
         </button>
-      </div>
+      </form>
     </AccountSection>
   );
 }
