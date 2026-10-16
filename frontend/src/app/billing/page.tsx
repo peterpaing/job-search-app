@@ -35,7 +35,11 @@ type BillingStatus = {
   };
 };
 
-type BillingAction = "checkout" | "portal" | "refresh";
+type BillingAction = "checkout" | "portal";
+type SyncSource = "initial" | "focus" | "manual";
+
+const billingAttempts = 4;
+const billingRetryDelay = 1500;
 
 const primaryButton =
   "bg-primary text-background focus-visible:outline-primary inline-flex min-h-12 items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-medium transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40";
@@ -47,24 +51,66 @@ const iconButton =
   "border-border text-muted hover:bg-surface hover:text-primary focus-visible:outline-primary inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40";
 
 const features = [
-  { icon: FiTarget, label: "Personalised SmartMatch recommendations" },
-  { icon: FiFileText, label: "Resume-to-profile skill extraction" },
-  { icon: FiMessageCircle, label: "Job-specific AI guidance" },
+  {
+    icon: FiTarget,
+    label: "Personalised SmartMatch recommendations",
+  },
+  {
+    icon: FiFileText,
+    label: "Resume-to-profile skill extraction",
+  },
+  {
+    icon: FiMessageCircle,
+    label: "Job-specific AI guidance",
+  },
 ];
 
-function LoadingCard() {
+class BillingRequestError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "BillingRequestError";
+  }
+}
+
+function waitForBillingRetry(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Billing check cancelled.", "AbortError"));
+      return;
+    }
+
+    function cancel() {
+      window.clearTimeout(timer);
+      signal.removeEventListener("abort", cancel);
+      reject(new DOMException("Billing check cancelled.", "AbortError"));
+    }
+
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener("abort", cancel);
+      resolve();
+    }, billingRetryDelay);
+
+    signal.addEventListener("abort", cancel, { once: true });
+  });
+}
+
+function LoadingCard({ label = "Loading billing" }: { label?: string }) {
   return (
     <div
       role="status"
-      aria-label="Loading billing"
+      aria-label={label}
       aria-busy="true"
       className="border-border bg-background overflow-hidden rounded-3xl border"
     >
-      <span className="sr-only">Loading billing…</span>
+      <span className="sr-only">{label}…</span>
 
       <div aria-hidden="true" className="motion-safe:animate-pulse">
         <div className="border-border flex items-center gap-3 border-b p-6 sm:p-8">
           <div className="bg-surface h-11 w-11 rounded-xl" />
+
           <div>
             <div className="bg-surface h-5 w-36 rounded" />
             <div className="bg-surface mt-2 h-4 w-24 rounded" />
@@ -78,6 +124,7 @@ function LoadingCard() {
             <div className="bg-surface mt-4 h-4 w-2/3 rounded" />
             <div className="bg-surface mt-4 h-4 w-3/4 rounded" />
           </div>
+
           <div>
             <div className="bg-surface h-6 w-40 rounded" />
             <div className="bg-surface mt-4 h-20 rounded-xl" />
@@ -114,10 +161,12 @@ function StatusBadge({ status }: { status: BillingStatus | null }) {
         aria-hidden="true"
         className="h-1.5 w-1.5 shrink-0 rounded-full bg-current"
       />
+
       {label}
     </span>
   );
 }
+
 function SubscriptionDetails({ status }: { status: BillingStatus }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -190,6 +239,7 @@ function SubscriptionDetails({ status }: { status: BillingStatus }) {
                 ? "Access ends"
                 : "Paid through"}
           </p>
+
           <p className="text-primary mt-1 text-sm font-medium">{paidDate}</p>
         </div>
       )}
@@ -212,6 +262,7 @@ function SubscriptionDetails({ status }: { status: BillingStatus }) {
                 aria-hidden="true"
                 className="h-1.5 w-1.5 rounded-full bg-current"
               />
+
               {renewalLabel}
             </span>
           </div>
@@ -236,24 +287,34 @@ function BillingWorkspace({
 
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [checking, setChecking] = useState(false);
   const [activeAction, setActiveAction] = useState<BillingAction | null>(null);
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const busy = activeAction !== null;
+  const busy = checking || activeAction !== null;
 
   const mounted = useRef(false);
   const operation = useRef(false);
   const controllers = useRef(new Set<AbortController>());
+  const syncController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     mounted.current = true;
+
     const activeControllers = controllers.current;
 
     return () => {
       mounted.current = false;
-      for (const controller of activeControllers) controller.abort();
+
+      syncController.current?.abort();
+      syncController.current = null;
+
+      for (const controller of activeControllers) {
+        controller.abort();
+      }
+
       activeControllers.clear();
     };
   }, []);
@@ -274,7 +335,9 @@ function BillingWorkspace({
         );
       }
 
-      if (!isCurrent()) throw new Error("Your account changed.");
+      if (!isCurrent()) {
+        throw new Error("Your account changed.");
+      }
 
       const token = await clerk.session?.getToken();
 
@@ -284,7 +347,8 @@ function BillingWorkspace({
 
       const controller = new AbortController();
       controllers.current.add(controller);
-      const timer = setTimeout(() => controller.abort(), 45_000);
+
+      const timer = window.setTimeout(() => controller.abort(), 45_000);
 
       try {
         const url = new URL(
@@ -309,7 +373,9 @@ function BillingWorkspace({
 
         const value: unknown = await response.json();
 
-        if (!isCurrent()) throw new Error("Your account changed.");
+        if (!isCurrent()) {
+          throw new Error("Your account changed.");
+        }
 
         if (!response.ok) {
           const message =
@@ -320,95 +386,207 @@ function BillingWorkspace({
               ? value.message
               : "Billing could not complete this request.";
 
-          throw new Error(message);
+          throw new BillingRequestError(response.status, message);
         }
 
         return value as T;
       } finally {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         controllers.current.delete(controller);
       }
     },
     [clerk, userId, sessionId],
   );
 
-  useEffect(() => {
-    const cancellation = new AbortController();
+  const synchronize = useCallback(
+    async (source: SyncSource) => {
+      // Focus and visibility events can arrive together.
+      // Share one check instead of starting competing refreshes.
+      if (!mounted.current || operation.current || syncController.current) {
+        return;
+      }
 
-    async function load() {
-      setLoading(true);
+      const controller = new AbortController();
+      syncController.current = controller;
+
+      function isCurrent() {
+        return (
+          mounted.current &&
+          !controller.signal.aborted &&
+          syncController.current === controller
+        );
+      }
+
+      setChecking(true);
       setError(null);
+      setNotice(null);
+
+      const params = new URLSearchParams(window.location.search);
+
+      const checkoutSession = params.get("session_id");
+      const checkoutReturn =
+        params.get("checkout") === "success" && Boolean(checkoutSession);
+      const portalReturn = params.get("returned") === "portal";
+
+      let checkoutVerified = false;
 
       try {
-        const params = new URLSearchParams(window.location.search);
-        const session = params.get("session_id");
-        let nextStatus: BillingStatus;
+        let nextStatus: BillingStatus | null = null;
 
-        if (params.get("checkout") === "success" && session) {
-          nextStatus = await request<BillingStatus>(
-            "/confirm",
-            "POST",
-            { sessionId: session },
-            cancellation.signal,
-          );
+        for (let attempt = 0; attempt < billingAttempts; attempt += 1) {
+          if (!isCurrent()) return;
 
-          if (!cancellation.signal.aborted) {
-            window.history.replaceState(window.history.state, "", "/billing");
-            setNotice(
-              nextStatus.premium
-                ? "Your payment is verified. Pro is ready."
-                : "Payment was checked. Refresh if access is still updating.",
-            );
-          }
-        } else if (params.get("returned") === "portal") {
-          nextStatus = await request<BillingStatus>(
-            "/refresh",
-            "POST",
-            undefined,
-            cancellation.signal,
-          );
+          try {
+            if (checkoutReturn && !checkoutVerified) {
+              nextStatus = await request<BillingStatus>(
+                "/confirm",
+                "POST",
+                { sessionId: checkoutSession },
+                controller.signal,
+              );
 
-          if (!cancellation.signal.aborted) {
-            window.history.replaceState(window.history.state, "", "/billing");
-          }
-        } else {
-          nextStatus = await request<BillingStatus>(
-            "/status",
-            "GET",
-            undefined,
-            cancellation.signal,
-          );
+              checkoutVerified = true;
+            } else if (source === "initial" && attempt === 0 && !portalReturn) {
+              nextStatus = await request<BillingStatus>(
+                "/status",
+                "GET",
+                undefined,
+                controller.signal,
+              );
 
-          if (
-            params.get("checkout") === "cancelled" &&
-            !cancellation.signal.aborted
-          ) {
-            setNotice("Checkout was cancelled.");
+              // A saved snapshot may be behind a renewal,
+              // cancellation, or recently completed checkout.
+              if (nextStatus.customerExists) {
+                nextStatus = await request<BillingStatus>(
+                  "/refresh",
+                  "POST",
+                  undefined,
+                  controller.signal,
+                );
+              }
+            } else {
+              nextStatus = await request<BillingStatus>(
+                "/refresh",
+                "POST",
+                undefined,
+                controller.signal,
+              );
+            }
+
+            if (!isCurrent()) return;
+
+            const stillUpdating =
+              nextStatus.customerExists &&
+              !nextStatus.blocked &&
+              !nextStatus.premium &&
+              (["active", "incomplete"].includes(nextStatus.status) ||
+                (checkoutReturn && nextStatus.status === "none"));
+
+            if (stillUpdating) {
+              throw new Error(
+                "Your subscription is still updating. Wait a moment, then retry the billing check.",
+              );
+            }
+
+            break;
+          } catch (failure) {
+            if (!isCurrent()) return;
+
+            const permanentClientError =
+              failure instanceof BillingRequestError &&
+              failure.status < 500 &&
+              ![409, 429].includes(failure.status);
+
+            if (permanentClientError || attempt === billingAttempts - 1) {
+              throw failure;
+            }
+
+            await waitForBillingRetry(controller.signal);
           }
         }
 
-        if (!cancellation.signal.aborted) setStatus(nextStatus);
+        if (!isCurrent() || !nextStatus) return;
+
+        setStatus(nextStatus);
+
+        if (checkoutReturn || portalReturn) {
+          window.history.replaceState(window.history.state, "", "/billing");
+        }
+
+        if (checkoutReturn) {
+          setNotice(
+            nextStatus.premium
+              ? "Your payment is verified. Pro is ready."
+              : "Your payment was checked. Your current billing status is shown below.",
+          );
+        } else if (params.get("checkout") === "cancelled") {
+          setNotice("Checkout was cancelled.");
+        } else if (source === "manual") {
+          setNotice("Billing status refreshed.");
+        }
       } catch (failure) {
-        if (!cancellation.signal.aborted && mounted.current) {
-          setError(
-            failure instanceof Error
-              ? failure.message
-              : "Could not load billing.",
-          );
-        }
+        if (!isCurrent()) return;
+
+        // Do not show a purchase form based on an
+        // unverified or stale subscription state.
+        setStatus(null);
+
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : "Could not check your subscription. Please retry.",
+        );
       } finally {
-        if (!cancellation.signal.aborted && mounted.current) {
-          setLoading(false);
+        if (syncController.current === controller) {
+          syncController.current = null;
+
+          if (mounted.current && !controller.signal.aborted) {
+            setChecking(false);
+            setLoading(false);
+          }
         }
+      }
+    },
+    [request],
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    // Schedule initial work after the effect is established.
+    // This also avoids duplicate initial work in Strict Mode.
+    queueMicrotask(() => {
+      if (active) {
+        void synchronize("initial");
+      }
+    });
+
+    function recheckWhenVisible() {
+      if (active && document.visibilityState !== "hidden") {
+        void synchronize("focus");
       }
     }
 
-    void load();
-    return () => cancellation.abort();
-  }, [request]);
+    window.addEventListener("focus", recheckWhenVisible);
+
+    document.addEventListener("visibilitychange", recheckWhenVisible);
+
+    return () => {
+      active = false;
+
+      window.removeEventListener("focus", recheckWhenVisible);
+
+      document.removeEventListener("visibilitychange", recheckWhenVisible);
+
+      syncController.current?.abort();
+      syncController.current = null;
+    };
+  }, [synchronize]);
 
   async function run(kind: BillingAction, action: () => Promise<void>) {
-    if (operation.current) return;
+    if (operation.current || syncController.current) {
+      return;
+    }
 
     operation.current = true;
     setActiveAction(kind);
@@ -427,7 +605,10 @@ function BillingWorkspace({
       }
     } finally {
       operation.current = false;
-      if (mounted.current) setActiveAction(null);
+
+      if (mounted.current) {
+        setActiveAction(null);
+      }
     }
   }
 
@@ -445,29 +626,33 @@ function BillingWorkspace({
   }
 
   function openCheckout() {
-    if (!consent || !status || status.blocked) return;
+    if (!consent || !status || status.blocked || checking) {
+      return;
+    }
 
     void run("checkout", async () => {
-      const result = await request<{ url: string }>("/checkout", "POST", {
+      const result = await request<{
+        url: string;
+      }>("/checkout", "POST", {
         consent: true,
       });
+
       redirectToStripe(result.url);
     });
   }
 
   function openPortal() {
     void run("portal", async () => {
-      const result = await request<{ url: string }>("/portal", "POST");
+      const result = await request<{
+        url: string;
+      }>("/portal", "POST");
+
       redirectToStripe(result.url);
     });
   }
 
   function refresh() {
-    void run("refresh", async () => {
-      const nextStatus = await request<BillingStatus>("/refresh", "POST");
-      setStatus(nextStatus);
-      setNotice("Billing status refreshed.");
-    });
+    void synchronize("manual");
   }
 
   const amount = status
@@ -477,16 +662,16 @@ function BillingWorkspace({
       }).format(status.price.amount / 100)
     : "$1.99";
 
-  const refreshLabel =
-    activeAction === "refresh"
-      ? "Refreshing billing status"
-      : "Refresh billing status";
+  const refreshLabel = checking
+    ? "Refreshing billing status"
+    : "Refresh billing status";
 
   return (
     <div className="space-y-4">
       {status?.mode === "test" && (
         <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900">
           <FiShield aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+
           <div className="text-xs leading-relaxed sm:text-sm">
             <span className="font-medium">Sandbox mode.</span> No real money is
             charged. Use Stripe test payment details, not a real card.
@@ -503,10 +688,12 @@ function BillingWorkspace({
             aria-hidden="true"
             className="mt-0.5 h-4 w-4 shrink-0"
           />
+
           <div>
             <p className="text-sm font-medium">
               We couldn’t complete that request
             </p>
+
             <p className="mt-1 text-xs leading-relaxed sm:text-sm">{error}</p>
           </div>
         </div>
@@ -521,12 +708,13 @@ function BillingWorkspace({
             aria-hidden="true"
             className="mt-0.5 h-4 w-4 shrink-0"
           />
+
           <span>{notice}</span>
         </div>
       )}
 
-      {loading ? (
-        <LoadingCard />
+      {loading || checking ? (
+        <LoadingCard label="Checking subscription" />
       ) : (
         <div className="border-border bg-background overflow-hidden rounded-3xl border">
           <header className="border-border flex flex-wrap items-center justify-between gap-4 border-b p-5 sm:p-7">
@@ -534,16 +722,19 @@ function BillingWorkspace({
               <span className="bg-surface text-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-xl">
                 <FaCrown aria-hidden="true" className="h-4 w-4" />
               </span>
+
               <div>
                 <h2 className="text-primary text-lg font-semibold">
                   StackWing Pro
                 </h2>
+
                 <p className="text-muted mt-1 text-xs">Monthly subscription</p>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
               <StatusBadge status={status} />
+
               <button
                 type="button"
                 disabled={busy}
@@ -552,12 +743,7 @@ function BillingWorkspace({
                 title={refreshLabel}
                 className={iconButton}
               >
-                <FiRefreshCw
-                  aria-hidden="true"
-                  className={`h-4 w-4 ${
-                    activeAction === "refresh" ? "motion-safe:animate-spin" : ""
-                  }`}
-                />
+                <FiRefreshCw aria-hidden="true" className="h-4 w-4" />
               </button>
             </div>
           </header>
@@ -578,6 +764,7 @@ function BillingWorkspace({
                 <span className="text-primary text-5xl font-semibold tracking-tight">
                   {amount}
                 </span>
+
                 <span className="text-muted text-sm">USD / month</span>
               </div>
 
@@ -594,6 +781,7 @@ function BillingWorkspace({
                         className="text-primary h-3.5 w-3.5"
                       />
                     </span>
+
                     <span className="text-primary pt-1.5 text-sm leading-relaxed">
                       {label}
                     </span>
@@ -606,6 +794,7 @@ function BillingWorkspace({
                   aria-hidden="true"
                   className="mt-0.5 h-3.5 w-3.5 shrink-0"
                 />
+
                 <span>
                   Payment details are handled by Stripe. StackWing doesn’t store
                   your card details.
@@ -637,7 +826,7 @@ function BillingWorkspace({
                     ? "Your Pro access is active. Manage billing here or continue to SmartMatch."
                     : status
                       ? "Continue to Stripe to review your subscription and enter payment details."
-                      : "Your billing status couldn’t be loaded. Refresh it before starting checkout."}
+                      : "Your billing status couldn’t be verified. Retry the check before starting checkout."}
               </p>
 
               {status && <SubscriptionDetails status={status} />}
@@ -653,6 +842,7 @@ function BillingWorkspace({
                       aria-describedby="billing-renewal-details"
                       className="accent-primary focus-visible:outline-primary mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed"
                     />
+
                     <span className="text-primary text-sm leading-relaxed">
                       I agree to pay {amount} USD per month, renewing
                       automatically until cancelled.
@@ -688,9 +878,11 @@ function BillingWorkspace({
                     className={`${primaryButton} w-full`}
                   >
                     <FiCreditCard aria-hidden="true" className="h-4 w-4" />
+
                     {activeAction === "checkout"
                       ? "Opening checkout…"
                       : "Continue to checkout"}
+
                     <FiArrowRight aria-hidden="true" className="h-4 w-4" />
                   </button>
                 )}
@@ -705,6 +897,7 @@ function BillingWorkspace({
                     {activeAction === "portal"
                       ? "Opening billing portal…"
                       : "Manage subscription"}
+
                     <FiExternalLink aria-hidden="true" className="h-4 w-4" />
                   </button>
                 )}
@@ -716,17 +909,8 @@ function BillingWorkspace({
                     onClick={refresh}
                     className={`${primaryButton} w-full`}
                   >
-                    <FiRefreshCw
-                      aria-hidden="true"
-                      className={`h-4 w-4 ${
-                        activeAction === "refresh"
-                          ? "motion-safe:animate-spin"
-                          : ""
-                      }`}
-                    />
-                    {activeAction === "refresh"
-                      ? "Checking status…"
-                      : "Retry billing status"}
+                    <FiRefreshCw aria-hidden="true" className="h-4 w-4" />
+                    Retry billing status
                   </button>
                 )}
               </div>
@@ -757,6 +941,7 @@ function BillingWorkspace({
                       aria-hidden="true"
                       className="mt-0.5 h-3.5 w-3.5 shrink-0"
                     />
+
                     <span>{detail}</span>
                   </p>
                 ))}
@@ -784,10 +969,12 @@ export default function BillingPage() {
           >
             <FiArrowLeft aria-hidden="true" className="h-4 w-4" />
           </Link>
+
           <div>
             <h1 className="text-primary text-xl font-semibold tracking-tight sm:text-2xl">
               Billing
             </h1>
+
             <p className="text-muted mt-1 text-sm">
               Manage your StackWing Pro subscription.
             </p>
@@ -801,13 +988,16 @@ export default function BillingPage() {
             <span className="bg-surface text-primary flex h-12 w-12 items-center justify-center rounded-xl">
               <FaCrown aria-hidden="true" className="h-5 w-5" />
             </span>
+
             <h2 className="text-primary mt-5 text-xl font-semibold">
               Your Pro subscription, in one place.
             </h2>
+
             <p className="text-muted mt-3 max-w-md text-sm leading-relaxed">
               Sign in to subscribe, check your access, or manage your billing
               details.
             </p>
+
             <SignInButton mode="modal" forceRedirectUrl="/billing">
               <button type="button" className={`${primaryButton} mt-6`}>
                 Sign in to continue

@@ -92,6 +92,7 @@ import {
   createCheckout,
   getBillingStatus,
   handleBillingEvent,
+  hasPremium,
   refreshBilling,
 } from "../../services/billing.service.js";
 import { getSandboxBillingClock } from "../../services/billing.clock.js";
@@ -529,6 +530,68 @@ describe("Billing service with a temporary local database", () => {
     expect(mocks.checkoutCreate).toHaveBeenCalledOnce();
 
     expect(mocks.checkoutRetrieve).toHaveBeenCalledWith("cs_test_open");
+  });
+
+  it.each(["complete", "expired"] as const)(
+    "creates a fresh checkout after the previous session is %s",
+    async (status) => {
+      await createCheckout(clerkId);
+
+      const oldKey = mocks.checkoutCreate.mock.calls[0]![1].idempotencyKey;
+      subscriptions = [subscription({ status: "canceled" })];
+
+      mocks.checkoutRetrieve.mockResolvedValue({
+        id: "cs_test_open",
+        status,
+        url: checkoutUrl,
+      });
+
+      const freshUrl = "https://checkout.stripe.com/c/pay/fresh";
+
+      // Model Stripe's cached response if the old key is reused.
+      mocks.checkoutCreate.mockImplementation(
+        async (_parameters: unknown, options: { idempotencyKey: string }) =>
+          options.idempotencyKey === oldKey
+            ? { id: "cs_test_open", status, url: checkoutUrl }
+            : { id: "cs_test_fresh", status: "open", url: freshUrl },
+      );
+
+      await expect(createCheckout(clerkId)).resolves.toEqual({ url: freshUrl });
+
+      const newKey = mocks.checkoutCreate.mock.calls[1]![1].idempotencyKey;
+      expect(newKey).not.toBe(oldKey);
+      expect(mocks.portalCreate).not.toHaveBeenCalled();
+
+      const saved = await database().query<{
+        checkout_key: string;
+        checkout_session_id: string;
+      }>(
+        `SELECT checkout_key, checkout_session_id
+         FROM billing_customers WHERE stripe_customer_id = $1`,
+        [customerId],
+      );
+
+      expect(saved.rows[0]!.checkout_session_id).toBe("cs_test_fresh");
+      expect(newKey).toBe(
+        `stackwing-checkout:test:${saved.rows[0]!.checkout_key}`,
+      );
+    },
+  );
+
+  it("preserves the checkout key and parameters after an uncertain creation failure", async () => {
+    mocks.checkoutCreate.mockRejectedValueOnce(new Error("Connection lost"));
+
+    await expect(createCheckout(clerkId)).rejects.toThrow("Connection lost");
+
+    await expect(createCheckout(clerkId)).resolves.toEqual({
+      url: checkoutUrl,
+    });
+
+    expect(mocks.checkoutCreate).toHaveBeenCalledTimes(2);
+    expect(mocks.checkoutCreate.mock.calls[1]).toEqual(
+      mocks.checkoutCreate.mock.calls[0],
+    );
+    expect(mocks.checkoutRetrieve).not.toHaveBeenCalled();
   });
 
   it("uses an idempotency key and omits payment_method_types", async () => {
@@ -1024,5 +1087,126 @@ describe("Billing service with a temporary local database", () => {
 
     expect(status.blocked).toBe(true);
     expect(status.premium).toBe(false);
+  });
+
+  it("recovers paid access without manually refreshing Billing", async () => {
+    // The mapped customer initially has no subscription snapshot.
+    expect((await getBillingStatus(clerkId)).premium).toBe(false);
+
+    // Stripe already knows that this customer has paid.
+    subscriptions = [subscription()];
+
+    await expect(hasPremium(clerkId)).resolves.toBe(true);
+
+    expect(mocks.subscriptionsList).toHaveBeenCalledOnce();
+
+    expect((await getBillingStatus(clerkId)).premium).toBe(true);
+  });
+
+  it("rechecks an expired snapshot before denying renewed access", async () => {
+    subscriptions = [subscription()];
+    await refreshBilling(clerkId);
+
+    await database().exec(`
+    UPDATE billing_subscriptions
+    SET paid_until = now() - interval '1 minute'
+  `);
+
+    mocks.subscriptionsList.mockClear();
+
+    await expect(hasPremium(clerkId)).resolves.toBe(true);
+
+    expect(mocks.subscriptionsList).toHaveBeenCalledOnce();
+  });
+
+  it("does not contact Stripe for an account without a billing customer", async () => {
+    await expect(hasPremium("user_without_billing")).resolves.toBe(false);
+
+    expect(mocks.subscriptionsList).not.toHaveBeenCalled();
+  });
+
+  it("does not bypass a billing risk hold", async () => {
+    await database().exec(`
+    UPDATE billing_customers
+    SET risk_hold = true
+  `);
+
+    subscriptions = [subscription()];
+
+    await expect(hasPremium(clerkId)).resolves.toBe(false);
+
+    expect(mocks.subscriptionsList).not.toHaveBeenCalled();
+  });
+
+  it("returns a verification error instead of denying access when Stripe fails", async () => {
+    mocks.subscriptionsList.mockImplementation(() => {
+      throw new Error("Stripe unavailable");
+    });
+
+    await expect(hasPremium(clerkId)).rejects.toThrow("Stripe unavailable");
+  });
+
+  it("does not grant access solely because a subscription is active", async () => {
+    subscriptions = [
+      subscription({
+        status: "active",
+        paid: false,
+      }),
+    ];
+
+    await expect(hasPremium(clerkId)).rejects.toMatchObject({
+      status: 503,
+    });
+  });
+
+  it("confirms ended subscriptions have no paid access", async () => {
+    subscriptions = [
+      subscription({
+        status: "canceled",
+      }),
+    ];
+
+    await expect(hasPremium(clerkId)).resolves.toBe(false);
+  });
+
+  it("reuses valid paid access without another subscription lookup", async () => {
+    subscriptions = [subscription()];
+    await refreshBilling(clerkId);
+
+    mocks.subscriptionsList.mockClear();
+
+    await expect(hasPremium(clerkId)).resolves.toBe(true);
+
+    expect(mocks.subscriptionsList).not.toHaveBeenCalled();
+  });
+
+  it("uses the expanded sandbox clock without another Stripe request", async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    enableSandboxClock(now);
+
+    mocks.customersRetrieve.mockResolvedValue({
+      id: customerId,
+      object: "customer",
+      livemode: false,
+      test_clock: {
+        id: "clock_billing_test",
+        object: "test_helpers.test_clock",
+        livemode: false,
+        status: "ready",
+        frozen_time: now,
+      },
+    });
+
+    await expect(getSandboxBillingClock(customerId)).resolves.toEqual({
+      id: "clock_billing_test",
+      nowSeconds: now,
+    });
+
+    expect(mocks.customersRetrieve).toHaveBeenCalledWith(customerId, {
+      expand: ["test_clock"],
+    });
+
+    expect(mocks.testClocksRetrieve).not.toHaveBeenCalled();
   });
 });

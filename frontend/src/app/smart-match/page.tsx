@@ -89,6 +89,74 @@ const secondaryButtonClass =
 const inputClass =
   "border-border bg-background text-primary focus-visible:outline-primary mt-2 w-full rounded-xl border px-4 py-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60";
 
+class SmartMatchRequestError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SmartMatchRequestError";
+  }
+}
+
+function waitForAccessRetry(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Access check cancelled.", "AbortError"));
+      return;
+    }
+
+    function cancel() {
+      window.clearTimeout(timer);
+      signal.removeEventListener("abort", cancel);
+
+      reject(new DOMException("Access check cancelled.", "AbortError"));
+    }
+
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener("abort", cancel);
+      resolve();
+    }, 1500);
+
+    signal.addEventListener("abort", cancel, {
+      once: true,
+    });
+  });
+}
+
+async function readVerifiedSmartMatchAccess<T>(
+  read: () => Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (signal.aborted) {
+      throw new DOMException("Access check cancelled.", "AbortError");
+    }
+
+    try {
+      return await read();
+    } catch (failure) {
+      if (signal.aborted) throw failure;
+
+      const retryable =
+        failure instanceof SmartMatchRequestError
+          ? failure.status === 409 ||
+            failure.status === 429 ||
+            failure.status >= 500
+          : failure instanceof TypeError ||
+            (failure instanceof DOMException && failure.name === "AbortError");
+
+      if (!retryable || attempt === 3) {
+        throw failure;
+      }
+
+      await waitForAccessRetry(signal);
+    }
+  }
+
+  throw new Error("Your subscription could not be verified. Please try again.");
+}
+
 function LoadingPanel() {
   return (
     <div role="status" aria-label="Loading SmartMatch" aria-busy="true">
@@ -253,7 +321,7 @@ function SmartMatchWorkspace({
               ? value.message
               : "SmartMatch couldn’t complete this request.";
 
-          throw new Error(message);
+          throw new SmartMatchRequestError(response.status, message);
         }
 
         return value as T;
@@ -273,27 +341,73 @@ function SmartMatchWorkspace({
 
   useEffect(() => {
     let current = true;
+    let running = false;
+    let currentPremium = false;
+
     const cancellation = new AbortController();
 
-    async function load() {
-      setLoading(true);
+    async function load(source: "initial" | "focus") {
+      if (!current || running || operation.current) {
+        return;
+      }
+
+      running = true;
       setError(null);
 
-      try {
-        const state = await request<BootstrapResponse>(
-          "/bootstrap",
-          "GET",
-          undefined,
-          cancellation.signal,
-        );
+      // Never display the purchase preview while an unverified
+      // or previously inactive account is being checked.
+      if (source === "initial" || !currentPremium) {
+        setLoading(true);
+      }
 
-        if (!current) {
+      if (source === "initial") {
+        setAccess(null);
+      }
+
+      try {
+        if (source === "focus" && currentPremium) {
+          // Recheck access without resetting the user's
+          // unsaved profile, resume text, or selected view.
+          const nextAccess = await readVerifiedSmartMatchAccess(
+            () =>
+              request<Access>("/access", "GET", undefined, cancellation.signal),
+            cancellation.signal,
+          );
+
+          if (!current || cancellation.signal.aborted) {
+            return;
+          }
+
+          currentPremium = nextAccess.premium;
+          setAccess(nextAccess);
+
+          if (!nextAccess.premium) {
+            setSelectedJob(null);
+          }
+
           return;
         }
 
+        const state = await readVerifiedSmartMatchAccess(
+          () =>
+            request<BootstrapResponse>(
+              "/bootstrap",
+              "GET",
+              undefined,
+              cancellation.signal,
+            ),
+          cancellation.signal,
+        );
+
+        if (!current || cancellation.signal.aborted) {
+          return;
+        }
+
+        currentPremium = state.access.premium;
         setAccess(state.access);
 
         if (!state.access.premium) {
+          setSelectedJob(null);
           return;
         }
 
@@ -305,31 +419,54 @@ function SmartMatchWorkspace({
         setMatches(state.matches);
         setSearched(state.searched);
 
-        if (state.profile) {
-          setView("matches");
-        } else {
-          setView("profile");
-        }
+        setView(state.profile ? "matches" : "profile");
       } catch (failure) {
-        if (current && mounted.current) {
+        if (current && mounted.current && !cancellation.signal.aborted) {
+          // Verification errors are not proof that the user
+          // needs to purchase Pro again.
+          if (!currentPremium) {
+            setAccess(null);
+          }
+
           setError(
             failure instanceof Error
               ? failure.message
-              : "SmartMatch couldn’t load.",
+              : "Your subscription could not be verified. Please try again.",
           );
         }
       } finally {
-        if (current && mounted.current) {
+        running = false;
+
+        if (current && mounted.current && !cancellation.signal.aborted) {
           setLoading(false);
         }
       }
     }
 
-    void load();
+    function recheckWhenVisible() {
+      if (document.visibilityState !== "hidden") {
+        void load("focus");
+      }
+    }
+
+    // Avoid duplicate initial work during Strict Mode setup.
+    queueMicrotask(() => {
+      if (current) {
+        void load("initial");
+      }
+    });
+
+    window.addEventListener("focus", recheckWhenVisible);
+
+    document.addEventListener("visibilitychange", recheckWhenVisible);
 
     return () => {
       current = false;
       cancellation.abort();
+
+      window.removeEventListener("focus", recheckWhenVisible);
+
+      document.removeEventListener("visibilitychange", recheckWhenVisible);
     };
   }, [request, retry]);
 

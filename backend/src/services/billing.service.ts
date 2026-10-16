@@ -359,23 +359,8 @@ const statusRowSchema = z.object({
 export async function getBillingStatus(clerkUserId: string) {
   const config = getBillingConfig();
 
-  let accessTime = sql`now()`;
-
-  if (sandboxBillingClockEnabled()) {
-    // Resolve ownership using verified identity.
-    const customer = await customerForUser(clerkUserId);
-
-    if (customer) {
-      const clock = await getSandboxBillingClock(customer.stripeCustomerId);
-
-      if (clock) {
-        accessTime = sql`
-          to_timestamp(${clock.nowSeconds}::double precision)
-        `;
-      }
-    }
-  }
-
+  // Read customer ownership and the subscription together.
+  // Snapshot freshness still uses real database time.
   const result = await db.execute(sql`
     SELECT
       (
@@ -383,8 +368,10 @@ export async function getBillingStatus(clerkUserId: string) {
         AND c.synced_at > now() - interval '48 hours'
         AND COALESCE(s.premium, false)
         AND s.price_id = ${config.priceId}
-        AND s.paid_until > ${accessTime}
       ) IS TRUE AS premium,
+      c.stripe_customer_id,
+      EXTRACT(EPOCH FROM now())::double precision
+        AS checked_at_epoch,
       c.risk_hold,
       s.status,
       s.paid_until::text AS paid_until,
@@ -400,10 +387,31 @@ export async function getBillingStatus(clerkUserId: string) {
     LIMIT 1
   `);
 
-  const row = result.rows[0] ? statusRowSchema.parse(result.rows[0]) : null;
+  const rowSchema = statusRowSchema.extend({
+    stripe_customer_id: z.string(),
+    checked_at_epoch: z.number().finite(),
+  });
+
+  const row = result.rows[0] ? rowSchema.parse(result.rows[0]) : null;
+
+  let premium = false;
+
+  if (row?.premium && row.paid_until) {
+    let accessTimeSeconds = row.checked_at_epoch;
+
+    if (sandboxBillingClockEnabled()) {
+      const clock = await getSandboxBillingClock(row.stripe_customer_id);
+
+      if (clock) {
+        accessTimeSeconds = clock.nowSeconds;
+      }
+    }
+
+    premium = Date.parse(row.paid_until) / 1000 > accessTimeSeconds;
+  }
 
   return {
-    premium: row?.premium ?? false,
+    premium,
     customerExists: row !== null,
     blocked: row?.risk_hold ?? false,
     status: row?.status ?? "none",
@@ -418,8 +426,35 @@ export async function getBillingStatus(clerkUserId: string) {
   };
 }
 
-export async function hasPremium(clerkUserId: string) {
-  return (await getBillingStatus(clerkUserId)).premium;
+export async function hasPremium(clerkUserId: string): Promise<boolean> {
+  const saved = await getBillingStatus(clerkUserId);
+
+  if (saved.blocked) return false;
+
+  // Existing verified paid access needs no additional Stripe request.
+  if (saved.premium) return true;
+
+  // Do not create Stripe customers for users who have never subscribed.
+  if (!saved.customerExists) return false;
+
+  // The saved snapshot may have expired before a renewal webhook arrived.
+  // Fetch current Stripe state before telling this user to subscribe again.
+  const verified = await refreshBilling(clerkUserId);
+
+  if (verified.blocked) return false;
+  if (verified.premium) return true;
+
+  // An active subscription without verified paid access is not permission
+  // to grant Pro, but it also should not trigger another purchase prompt.
+  if (verified.status === "active") {
+    throw new BillingError(
+      503,
+      "Your subscription is still being verified. Please try again shortly.",
+    );
+  }
+
+  // Stripe has confirmed there is no current paid access.
+  return false;
 }
 
 async function portalUrl(customerId: string): Promise<string> {
@@ -528,8 +563,11 @@ export async function createCheckout(clerkUserId: string) {
       }
     }
 
+    // Reuse a reservation only when creation has no saved session yet.
+    // A closed session needs a fresh key, not Stripe's cached creation response.
     // Checkout reservations always use real time.
     const reusable =
+      !freshCustomer.checkoutSessionId &&
       freshCustomer.checkoutKey &&
       freshCustomer.checkoutExpiresAt &&
       Date.parse(freshCustomer.checkoutExpiresAt) > Date.now() + 60_000;
