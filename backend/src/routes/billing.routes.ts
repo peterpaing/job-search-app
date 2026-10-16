@@ -1,13 +1,24 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { clerkMiddleware, getAuth } from "@clerk/express";
 import { Router, type ErrorRequestHandler, type RequestHandler } from "express";
 import { z } from "zod";
-import { BillingError, verifyStripeEvent } from "../services/billing.config.js";
+import {
+  BillingBusyError,
+  BillingError,
+  verifyStripeEvent,
+} from "../services/billing.config.js";
+
+// Five processing attempts, with four short waits.
+// Only lock contention is retried inside this request.
+const webhookRetryDelays = [250, 500, 1000, 2000];
 
 export const stripeWebhook: RequestHandler = async (req, res) => {
   const signature = req.get("stripe-signature");
 
   if (!signature || !Buffer.isBuffer(req.body)) {
-    res.status(400).json({ message: "Invalid webhook request." });
+    res.status(400).json({
+      message: "Invalid webhook request.",
+    });
     return;
   }
 
@@ -22,6 +33,7 @@ export const stripeWebhook: RequestHandler = async (req, res) => {
           ? error.message
           : "Invalid webhook signature.",
     });
+
     return;
   }
 
@@ -29,16 +41,47 @@ export const stripeWebhook: RequestHandler = async (req, res) => {
     const { handleBillingEvent } =
       await import("../services/billing.service.js");
 
-    await handleBillingEvent(event);
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        // Each retry keeps the original event ID.
+        // Already-processed events remain protected by
+        // the service's existing idempotency check.
+        await handleBillingEvent(event);
+        break;
+      } catch (error) {
+        const waitMilliseconds = webhookRetryDelays[attempt];
 
+        if (
+          !(error instanceof BillingBusyError) ||
+          waitMilliseconds === undefined
+        ) {
+          throw error;
+        }
+
+        await delay(waitMilliseconds);
+      }
+    }
+
+    // Acknowledge only after processing succeeds.
     res.json({ received: true });
-  } catch {
+  } catch (error) {
     console.error("Stripe webhook processing failed", {
       eventId: event.id,
       type: event.type,
+      errorKind:
+        error instanceof BillingBusyError
+          ? "BillingBusyError"
+          : error instanceof BillingError
+            ? "BillingError"
+            : "UnexpectedError",
+      billingStatus: error instanceof BillingError ? error.status : null,
+      message:
+        error instanceof BillingError
+          ? error.message
+          : "Unexpected processing failure; raw details omitted.",
     });
 
-    // Do not acknowledge failed processing: Stripe must retry.
+    // Keep unsuccessful processing retryable.
     res.status(503).json({
       message: "Webhook processing needs a retry.",
     });
