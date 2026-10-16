@@ -5,7 +5,12 @@ import { z } from "zod";
 import { db } from "../db/index.js";
 import { billingCustomers, billingEvents } from "../db/billing.schema.js";
 import { getOrCreateUser } from "./users.service.js";
-import { BillingError, getBillingConfig, getStripe } from "./billing.config.js";
+import {
+  BillingBusyError,
+  BillingError,
+  getBillingConfig,
+  getStripe,
+} from "./billing.config.js";
 import {
   getSandboxBillingClock,
   sandboxBillingClockEnabled,
@@ -121,10 +126,7 @@ async function withCustomerLock<T>(
   `);
 
   if (lease.rows.length === 0) {
-    throw new BillingError(
-      409,
-      "Billing is updating. Please try again in a moment.",
-    );
+    throw new BillingBusyError();
   }
 
   try {

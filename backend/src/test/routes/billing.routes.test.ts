@@ -32,7 +32,10 @@ import {
   createBillingRouter,
   stripeWebhook,
 } from "../../routes/billing.routes.js";
-import { BillingError } from "../../services/billing.config.js";
+import {
+  BillingBusyError,
+  BillingError,
+} from "../../services/billing.config.js";
 
 const clerkId = "user_verified_billing";
 const webhookSecret = "whsec_local_test_only";
@@ -337,5 +340,80 @@ describe("Billing routes", () => {
     expect(result.body).toEqual({
       message: "Webhook processing needs a retry.",
     });
+  });
+  it("retries a busy billing lock and returns 200 after processing succeeds", async () => {
+    mocks.handleBillingEvent
+      .mockRejectedValueOnce(new BillingBusyError())
+      .mockResolvedValueOnce(undefined);
+
+    const payload = webhookPayload();
+
+    const result = await request(app)
+      .post("/api/billing/webhook")
+      .set("Content-Type", "application/json")
+      .set("stripe-signature", signature(payload))
+      .send(payload);
+
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({
+      received: true,
+    });
+
+    expect(mocks.handleBillingEvent).toHaveBeenCalledTimes(2);
+
+    for (const [notification] of mocks.handleBillingEvent.mock.calls) {
+      expect(notification.id).toBe("evt_route_test");
+    }
+  });
+
+  it("returns 503 when the billing lock remains busy after all attempts", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    mocks.handleBillingEvent.mockRejectedValue(new BillingBusyError());
+
+    const payload = webhookPayload();
+
+    const result = await request(app)
+      .post("/api/billing/webhook")
+      .set("Content-Type", "application/json")
+      .set("stripe-signature", signature(payload))
+      .send(payload);
+
+    expect(result.status).toBe(503);
+
+    expect(result.body).toEqual({
+      message: "Webhook processing needs a retry.",
+    });
+
+    expect(mocks.handleBillingEvent).toHaveBeenCalledTimes(5);
+
+    expect(log).toHaveBeenCalledWith(
+      "Stripe webhook processing failed",
+      expect.objectContaining({
+        eventId: "evt_route_test",
+        errorKind: "BillingBusyError",
+        billingStatus: 409,
+      }),
+    );
+  }, 15_000);
+
+  it("does not retry unrelated billing errors", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    mocks.handleBillingEvent.mockRejectedValue(
+      new BillingError(409, "A different billing conflict."),
+    );
+
+    const payload = webhookPayload();
+
+    const result = await request(app)
+      .post("/api/billing/webhook")
+      .set("Content-Type", "application/json")
+      .set("stripe-signature", signature(payload))
+      .send(payload);
+
+    expect(result.status).toBe(503);
+
+    expect(mocks.handleBillingEvent).toHaveBeenCalledOnce();
   });
 });

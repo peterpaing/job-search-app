@@ -10,6 +10,14 @@ export class BillingError extends Error {
   }
 }
 
+export class BillingBusyError extends BillingError {
+  constructor() {
+    super(409, "Billing is updating. Please try again in a moment.");
+
+    this.name = "BillingBusyError";
+  }
+}
+
 function required(name: string): string {
   const value = process.env[name]?.trim();
 
