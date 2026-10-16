@@ -14,7 +14,10 @@ type SmartMatchChatProps = {
   job: Job;
   aiEnabled: boolean;
   disabled: boolean;
-  onAsk: (question: string) => Promise<ChatAnswer>;
+  onAsk: (
+    question: string,
+    onDelta: (delta: string) => void,
+  ) => Promise<ChatAnswer>;
   onClose: () => void;
 };
 
@@ -100,13 +103,26 @@ export default function SmartMatchChat({
     setQuestion("");
 
     try {
-      const result = await onAsk(value);
+      const result = await onAsk(value, (delta) => {
+        if (!mounted.current) {
+          return;
+        }
+
+        setAnswer((previous) => ({
+          answer: (previous?.answer ?? "") + delta,
+          cached: false,
+        }));
+      });
 
       if (mounted.current) {
+        // The completed, validated result replaces the provisional text.
         setAnswer(result);
       }
     } catch (failure) {
       if (mounted.current) {
+        // Do not present an interrupted answer as a successful answer.
+        setAnswer(null);
+
         setError(
           failure instanceof Error
             ? failure.message
@@ -197,7 +213,7 @@ export default function SmartMatchChat({
           </div>
         )}
 
-        {loading && (
+        {loading && !answer && (
           <div
             role="status"
             aria-label="Generating answer"

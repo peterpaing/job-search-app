@@ -254,6 +254,7 @@ describe("SmartMatch routes", () => {
       "user_verified",
       "job-a",
       "Explain my fit.",
+      undefined,
     );
   });
 

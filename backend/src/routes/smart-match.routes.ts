@@ -225,18 +225,67 @@ export function createSmartMatchRouter(frontendOrigin: string) {
       return;
     }
 
+    const streaming =
+      req.get("accept")?.includes("application/x-ndjson") === true;
+
+    function writeEvent(event: unknown) {
+      if (res.destroyed || res.writableEnded) {
+        return;
+      }
+
+      if (!res.headersSent) {
+        res.status(200);
+        res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store, no-transform");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.flushHeaders();
+      }
+
+      res.write(`${JSON.stringify(event)}\n`);
+    }
+
     try {
       const service = await import("../services/smart-match.service.js");
 
-      res.json(
-        await service.answerSmartMatchQuestion(
-          res.locals.clerkUserId as string,
-          parsed.data.jobId,
-          parsed.data.question,
-        ),
+      const result = await service.answerSmartMatchQuestion(
+        res.locals.clerkUserId as string,
+        parsed.data.jobId,
+        parsed.data.question,
+        streaming ? (delta) => writeEvent({ type: "delta", delta }) : undefined,
       );
+
+      if (streaming) {
+        writeEvent({ type: "done", result });
+
+        if (!res.destroyed && !res.writableEnded) {
+          res.end();
+        }
+
+        return;
+      }
+
+      res.json(result);
     } catch (error) {
-      next(error);
+      if (!res.headersSent) {
+        next(error);
+        return;
+      }
+
+      writeEvent({
+        type: "error",
+        status:
+          error instanceof SmartMatchError || error instanceof BillingError
+            ? error.status
+            : 500,
+        message:
+          error instanceof SmartMatchError || error instanceof BillingError
+            ? error.message
+            : "AI couldn’t complete this request. Please try again later.",
+      });
+
+      if (!res.destroyed && !res.writableEnded) {
+        res.end();
+      }
     }
   });
 
