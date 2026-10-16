@@ -19,11 +19,16 @@ export function sandboxBillingClockEnabled(): boolean {
 export async function getSandboxBillingClock(
   customerId: string,
 ): Promise<SandboxBillingClock | null> {
-  // Never retrieve simulated time for live or disabled environments.
-  if (!sandboxBillingClockEnabled()) return null;
+  if (!sandboxBillingClockEnabled()) {
+    return null;
+  }
 
   const stripe = getStripe();
-  const customer = await stripe.customers.retrieve(customerId);
+
+  // Retrieve the customer and its clock together.
+  const customer = await stripe.customers.retrieve(customerId, {
+    expand: ["test_clock"],
+  });
 
   if (
     customer.deleted ||
@@ -38,15 +43,21 @@ export async function getSandboxBillingClock(
 
   const reference = customer.test_clock;
 
-  // Ordinary test customers continue using real time.
-  if (!reference) return null;
+  if (!reference) {
+    return null;
+  }
 
-  const clockId = typeof reference === "string" ? reference : reference.id;
+  // Normally Stripe returns the expanded object.
+  // Keep compatibility if it returns only an ID.
+  const clock =
+    typeof reference === "string"
+      ? await stripe.testHelpers.testClocks.retrieve(reference)
+      : reference;
 
-  const clock = await stripe.testHelpers.testClocks.retrieve(clockId);
+  const expectedId = typeof reference === "string" ? reference : reference.id;
 
   if (
-    clock.id !== clockId ||
+    clock.id !== expectedId ||
     clock.livemode !== false ||
     !Number.isSafeInteger(clock.frozen_time) ||
     clock.frozen_time <= 0
@@ -57,7 +68,6 @@ export async function getSandboxBillingClock(
     );
   }
 
-  // Avoid committing a snapshot while simulated objects are changing.
   if (clock.status !== "ready") {
     throw new BillingError(
       503,
