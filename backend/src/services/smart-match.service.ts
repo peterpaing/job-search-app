@@ -37,6 +37,7 @@ import {
   reservationFor,
   type TokenUsage,
 } from "./smart-match.costs.js";
+import { readSmartMatchStream } from "./smart-match.stream.js";
 
 const responseSchema = z.object({
   status: z.string(),
@@ -214,6 +215,7 @@ async function generate<T>(
   input: unknown,
   jsonSchema: Record<string, unknown>,
   validator: z.ZodType<T>,
+  onDelta?: (delta: string) => void,
 ) {
   const cached = await readCache(userId, key);
 
@@ -244,9 +246,13 @@ async function generate<T>(
     throw new SmartMatchError(413, "This request is too large.");
   }
 
+  const streaming = kind === "answer" && onDelta !== undefined;
+
   const body = {
     model: AI_MODEL,
     store: false,
+
+    ...(streaming ? { stream: true } : {}),
 
     instructions:
       kind === "answer"
@@ -254,15 +260,12 @@ async function generate<T>(
         : instructions,
 
     input: inputText,
-
     max_output_tokens: MAX_OUTPUT_TOKENS,
 
     text: {
       format: {
         type: "json_schema",
-
         name: kind === "extract" ? "developer_profile" : "scoped_job_answer",
-
         strict: true,
         schema: jsonSchema,
       },
@@ -284,7 +287,6 @@ async function generate<T>(
 
       headers: {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-
         "Content-Type": "application/json",
       },
 
@@ -292,12 +294,17 @@ async function generate<T>(
       body: JSON.stringify(body),
     });
 
-    const raw: unknown = await response.json();
+    const raw: unknown =
+      streaming && response.ok && onDelta
+        ? await readSmartMatchStream(response, onDelta, (terminalResponse) => {
+            reportedUsage = readTokenUsage(terminalResponse);
+          })
+        : await response.json();
 
     reportedUsage = readTokenUsage(raw);
 
-    // Track reported usage even for incomplete, refused,
-    // or invalid answers.
+    // Reported usage is accounted for even if the answer is invalid,
+    // incomplete, or refused.
     await settleBudget(leaseId, reportedUsage);
     settled = true;
 
@@ -333,6 +340,7 @@ async function generate<T>(
 
     const value = validator.parse(JSON.parse(text) as unknown);
 
+    // Only completed, validated answers can enter the cache.
     // Only the active lease holder can store a result.
     await db.execute(sql`
       INSERT INTO smart_match_cache (
@@ -378,10 +386,10 @@ async function generate<T>(
   } finally {
     try {
       if (!settled) {
+        // Missing provider usage remains unconfirmed, not free.
         await settleBudget(leaseId, reportedUsage);
       }
     } catch {
-      // Keep the reservation if accounting is unavailable.
       console.error("[smartmatch-accounting] Settlement needs reconciliation.");
     }
 
@@ -441,6 +449,7 @@ export async function answerSmartMatchQuestion(
   clerkUserId: string,
   jobId: string,
   question: string,
+  onDelta?: (delta: string) => void,
 ) {
   const user = await getOrCreateUser(clerkUserId);
 
@@ -520,6 +529,7 @@ export async function answerSmartMatchQuestion(
 
     jobAnswerJsonSchema,
     jobAnswerSchema,
+    onDelta,
   );
 
   return {

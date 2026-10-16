@@ -72,6 +72,125 @@ type AnswerResponse = {
   usage: SmartMatchUsageData;
 };
 
+async function readAnswerStream<T>(
+  response: Response,
+  onDelta: (delta: string) => void,
+  ensureCurrent: () => void,
+): Promise<T> {
+  if (!response.body) {
+    throw new Error("SmartMatch couldn’t complete this request.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  let buffer = "";
+  let receivedBytes = 0;
+
+  function consumeLine(line: string): { result: T } | undefined {
+    if (!line.trim()) {
+      return;
+    }
+
+    const event: unknown = JSON.parse(line);
+
+    if (typeof event !== "object" || event === null || !("type" in event)) {
+      throw new Error("SmartMatch couldn’t complete this request.");
+    }
+
+    if (
+      event.type === "delta" &&
+      "delta" in event &&
+      typeof event.delta === "string"
+    ) {
+      onDelta(event.delta);
+      return;
+    }
+
+    if (
+      event.type === "done" &&
+      "result" in event &&
+      typeof event.result === "object" &&
+      event.result !== null &&
+      "answer" in event.result &&
+      typeof event.result.answer === "string" &&
+      "cached" in event.result &&
+      typeof event.result.cached === "boolean" &&
+      "usage" in event.result
+    ) {
+      return { result: event.result as T };
+    }
+
+    if (event.type === "error") {
+      const status =
+        "status" in event && typeof event.status === "number"
+          ? event.status
+          : 502;
+
+      const message =
+        "message" in event && typeof event.message === "string"
+          ? event.message
+          : "AI couldn’t complete this request. Please try again later.";
+
+      throw new SmartMatchRequestError(status, message);
+    }
+
+    throw new Error("SmartMatch couldn’t complete this request.");
+  }
+
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      ensureCurrent();
+
+      if (chunk.done) {
+        buffer += decoder.decode();
+      } else {
+        receivedBytes += chunk.value.byteLength;
+
+        if (receivedBytes > 2_000_000) {
+          throw new Error("SmartMatch couldn’t complete this request.");
+        }
+
+        buffer += decoder.decode(chunk.value, { stream: true });
+      }
+
+      let newline = buffer.indexOf("\n");
+
+      while (newline !== -1) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+
+        const completed = consumeLine(line);
+
+        if (completed) {
+          return completed.result;
+        }
+
+        newline = buffer.indexOf("\n");
+      }
+
+      if (chunk.done) {
+        if (buffer.trim()) {
+          const completed = consumeLine(buffer);
+
+          if (completed) {
+            return completed.result;
+          }
+        }
+
+        // A disconnected stream must not look like a finished answer.
+        throw new Error(
+          "AI couldn’t complete this request. Please try again later.",
+        );
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
 const emptyProfile: Profile = {
   skills: [],
   roles: [],
@@ -243,27 +362,32 @@ function SmartMatchWorkspace({
       method = "GET",
       body?: unknown,
       cancellation?: AbortSignal,
+      onAnswerDelta?: (delta: string) => void,
     ): Promise<T> => {
       const session = clerk.session;
 
-      if (
-        cancellation?.aborted ||
-        !mounted.current ||
-        clerk.user?.id !== userId ||
-        session?.id !== sessionId
-      ) {
-        throw new Error("Your account changed. Please try again.");
+      function ensureCurrent() {
+        if (
+          cancellation?.aborted ||
+          !mounted.current ||
+          clerk.user?.id !== userId ||
+          clerk.session?.id !== sessionId
+        ) {
+          throw new Error("Your account changed. Please try again.");
+        }
+      }
+
+      ensureCurrent();
+
+      if (session?.id !== sessionId) {
+        throw new Error("Please sign in again.");
       }
 
       const token = await session.getToken();
 
-      if (
-        cancellation?.aborted ||
-        !token ||
-        !mounted.current ||
-        clerk.user?.id !== userId ||
-        clerk.session?.id !== sessionId
-      ) {
+      ensureCurrent();
+
+      if (!token) {
         throw new Error("Please sign in again.");
       }
 
@@ -291,22 +415,19 @@ function SmartMatchWorkspace({
             ...(body !== undefined
               ? { "Content-Type": "application/json" }
               : {}),
+
+            ...(onAnswerDelta ? { Accept: "application/x-ndjson" } : {}),
           },
 
           ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
         });
 
-        const value: unknown = await response.json();
-
-        if (
-          !mounted.current ||
-          clerk.user?.id !== userId ||
-          clerk.session?.id !== sessionId
-        ) {
-          throw new Error("Your account changed. Please try again.");
-        }
+        ensureCurrent();
 
         if (!response.ok) {
+          const value: unknown = await response.json();
+          ensureCurrent();
+
           if (response.status === 403) {
             setAccess((previous) =>
               previous ? { ...previous, premium: false } : previous,
@@ -323,6 +444,23 @@ function SmartMatchWorkspace({
 
           throw new SmartMatchRequestError(response.status, message);
         }
+
+        if (
+          onAnswerDelta &&
+          response.headers.get("content-type")?.includes("application/x-ndjson")
+        ) {
+          return await readAnswerStream<T>(
+            response,
+            (delta) => {
+              ensureCurrent();
+              onAnswerDelta(delta);
+            },
+            ensureCurrent,
+          );
+        }
+
+        const value: unknown = await response.json();
+        ensureCurrent();
 
         return value as T;
       } finally {
@@ -588,7 +726,10 @@ function SmartMatchWorkspace({
     }
   }
 
-  async function askJobQuestion(question: string): Promise<AnswerResponse> {
+  async function askJobQuestion(
+    question: string,
+    onDelta: (delta: string) => void,
+  ): Promise<AnswerResponse> {
     const job = selectedJob;
 
     if (!job) {
@@ -605,10 +746,16 @@ function SmartMatchWorkspace({
     setNotice(null);
 
     try {
-      const result = await request<AnswerResponse>("/ask", "POST", {
-        jobId: job.id,
-        question: question.trim(),
-      });
+      const result = await request<AnswerResponse>(
+        "/ask",
+        "POST",
+        {
+          jobId: job.id,
+          question: question.trim(),
+        },
+        undefined,
+        onDelta,
+      );
 
       setUsage(result.usage);
       return result;
