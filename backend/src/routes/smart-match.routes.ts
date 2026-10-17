@@ -8,6 +8,7 @@ import {
 } from "../services/smart-match.logic.js";
 import { BillingError } from "../services/billing.config.js";
 import { accountDeletionGuard } from "../middleware/account-deletion.middleware.js";
+import { createAiRequestLimiter } from "../middleware/rate-limit.middleware.js";
 
 const extractSchema = z
   .object({
@@ -55,7 +56,7 @@ export function createSmartMatchRouter(frontendOrigin: string) {
       next(error);
     }
   });
-
+  router.use(["/extract", "/ask"], createAiRequestLimiter());
   router.get("/bootstrap", async (_req, res, next) => {
     try {
       const config = getSmartMatchConfig();
@@ -126,23 +127,7 @@ export function createSmartMatchRouter(frontendOrigin: string) {
   });
 
   // Keep all other SmartMatch operations protected by Pro.
-  router.use(async (_req, res, next) => {
-    try {
-      const { hasSmartMatchAccess: hasPremium } =
-        await import("../services/smart-match.owner.js");
 
-      if (!(await hasPremium(res.locals.clerkUserId as string))) {
-        res.status(403).json({
-          message: "An active, paid StackWing Pro subscription is required.",
-        });
-        return;
-      }
-
-      next();
-    } catch (error) {
-      next(error);
-    }
-  });
   router.use(async (_req, res, next) => {
     try {
       const { hasSmartMatchAccess: hasPremium } =
@@ -329,3 +314,4 @@ export function createSmartMatchRouter(frontendOrigin: string) {
 
   return router;
 }
+// Keep all other SmartMatch operations protected by Pro.

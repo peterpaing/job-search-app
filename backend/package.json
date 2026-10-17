@@ -33,6 +33,7 @@
     "dotenv": "^18.0.6",
     "drizzle-orm": "^0.45.4",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.1",
     "html-to-text": "^9.0.5",
     "rss-parser": "^3.13.0",
     "stripe": "^23.0.0",

@@ -48,9 +48,7 @@ vi.mock("../../services/account-deletion.state.js", () => ({
   AccountDeletionError: class AccountDeletionError extends Error {},
 }));
 
-const app = express();
-app.use(express.json());
-app.use("/api/smart-match", createSmartMatchRouter("http://localhost:3000"));
+let app: ReturnType<typeof express>;
 
 const profile = {
   skills: ["React"],
@@ -102,6 +100,13 @@ describe("SmartMatch routes", () => {
   });
   beforeEach(() => {
     vi.resetAllMocks();
+
+    app = express();
+    app.use(express.json());
+    app.use(
+      "/api/smart-match",
+      createSmartMatchRouter("http://localhost:3000"),
+    );
 
     vi.stubEnv("SMARTMATCH_OWNER_CLERK_USER_ID", "");
     vi.stubEnv("SMARTMATCH_AI_ENABLED", "false");

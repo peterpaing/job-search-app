@@ -1,3 +1,5 @@
+import { isShuttingDown, trackTask } from "../runtime.js";
+
 export function startAccountDeletionWorker(): () => void {
   if (process.env.ACCOUNT_DELETION_WORKER_ENABLED !== "true") {
     return () => undefined;
@@ -7,15 +9,23 @@ export function startAccountDeletionWorker(): () => void {
   let stopped = false;
 
   async function tick() {
-    if (running || stopped) return;
+    if (running || stopped || isShuttingDown()) {
+      return;
+    }
 
     running = true;
 
     try {
-      const { processPendingAccountDeletions } =
-        await import("../services/account-deletion.service.js");
+      await trackTask(async () => {
+        const { processPendingAccountDeletions } =
+          await import("../services/account-deletion.service.js");
 
-      await processPendingAccountDeletions();
+        if (stopped || isShuttingDown()) {
+          return;
+        }
+
+        await processPendingAccountDeletions();
+      });
     } catch {
       console.error("[account-deletion] Retry worker needs attention.");
     } finally {

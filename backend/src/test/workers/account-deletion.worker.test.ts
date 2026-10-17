@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as runtime from "../../runtime.js";
 
 const mocks = vi.hoisted(() => ({
   processPending: vi.fn(),
@@ -125,5 +126,52 @@ describe("account deletion worker", () => {
 
     expect(mocks.processPending).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
+  });
+  it("does not begin queue processing during shutdown", async () => {
+    vi.spyOn(runtime, "isShuttingDown").mockReturnValue(true);
+
+    start();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settleImports();
+
+    expect(mocks.processPending).not.toHaveBeenCalled();
+  });
+
+  it("keeps an active queue task tracked after polling stops", async () => {
+    let release!: () => void;
+
+    mocks.processPending.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const stop = start();
+
+    await settleImports();
+
+    expect(mocks.processPending).toHaveBeenCalledOnce();
+
+    let idle = false;
+
+    const waiting = runtime.waitForTasks().then(() => {
+      idle = true;
+    });
+
+    stop();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settleImports();
+
+    expect(mocks.processPending).toHaveBeenCalledOnce();
+    expect(idle).toBe(false);
+
+    release();
+
+    await waiting;
+
+    expect(idle).toBe(true);
   });
 });
