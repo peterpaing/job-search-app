@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import SmartMatchChat from "../../app/component/SmartMatchChat";
@@ -170,5 +170,167 @@ describe("SmartMatchChat", () => {
         "AI is temporarily unavailable. Please try again later.",
       ),
     ).toBeInTheDocument();
+  });
+  describe("SmartMatchChat streamed answers", () => {
+    function startChat() {
+      let emit!: (delta: string) => void;
+      let resolve!: (answer: Answer) => void;
+      let reject!: (error: Error) => void;
+
+      const ask = vi.fn(
+        (_question: string, onDelta: (delta: string) => void) => {
+          emit = onDelta;
+
+          return new Promise<Answer>((resolveAnswer, rejectAnswer) => {
+            resolve = resolveAnswer;
+            reject = rejectAnswer;
+          });
+        },
+      );
+
+      const view = render(
+        <SmartMatchChat
+          job={job}
+          aiEnabled
+          disabled={false}
+          onAsk={ask}
+          onClose={vi.fn()}
+        />,
+      );
+
+      return {
+        ...view,
+        ask,
+        emit: (text: string) => emit(text),
+        finish: (value: Answer) => resolve(value),
+        fail: (error: Error) => reject(error),
+      };
+    }
+
+    async function sendQuestion() {
+      const user = userEvent.setup();
+
+      await user.type(
+        screen.getByRole("textbox", { name: "Your question" }),
+        "Explain my fit.",
+      );
+      await user.click(screen.getByRole("button", { name: "Send question" }));
+    }
+
+    it("shows partial answer text before the answer finishes", async () => {
+      const chat = startChat();
+      await sendQuestion();
+
+      expect(screen.getByText("Thinking…")).toBeInTheDocument();
+
+      act(() => {
+        chat.emit("Highlight ");
+      });
+
+      expect(screen.getByText("Highlight")).toBeInTheDocument();
+      expect(screen.queryByText("Thinking…")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Send question" }),
+      ).toBeDisabled();
+
+      act(() => {
+        chat.emit("your React experience.");
+      });
+
+      expect(
+        screen.getByText("Highlight your React experience."),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        chat.finish({
+          answer: "Highlight your React experience.",
+          cached: false,
+        });
+      });
+
+      expect(chat.ask).toHaveBeenCalledTimes(1);
+    });
+
+    it("replaces provisional text with the validated final answer", async () => {
+      const chat = startChat();
+      await sendQuestion();
+
+      act(() => {
+        chat.emit("Provisional text");
+      });
+
+      await act(async () => {
+        chat.finish({
+          answer: "Validated final answer.",
+          cached: false,
+        });
+      });
+
+      expect(screen.getByText("Validated final answer.")).toBeInTheDocument();
+      expect(screen.queryByText("Provisional text")).not.toBeInTheDocument();
+    });
+
+    it("removes an interrupted partial answer and restores the question", async () => {
+      const chat = startChat();
+      await sendQuestion();
+
+      act(() => {
+        chat.emit("Incomplete advice");
+      });
+
+      await act(async () => {
+        chat.fail(new Error("Answer interrupted."));
+      });
+
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Answer interrupted.",
+      );
+      expect(screen.queryByText("Incomplete advice")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("textbox", { name: "Your question" }),
+      ).toHaveValue("Explain my fit.");
+      expect(
+        screen.getByRole("button", { name: "Send question" }),
+      ).toBeEnabled();
+
+      expect(chat.ask).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not send a second request while the first answer is streaming", async () => {
+      const chat = startChat();
+      await sendQuestion();
+
+      act(() => {
+        chat.emit("Partial");
+      });
+
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole("button", { name: "Send question" }));
+
+      expect(chat.ask).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        chat.finish({ answer: "Complete.", cached: false });
+      });
+    });
+
+    it("ignores late deltas after the chat is unmounted", async () => {
+      const chat = startChat();
+      await sendQuestion();
+
+      chat.unmount();
+
+      await act(async () => {
+        chat.emit("Late answer");
+        chat.finish({ answer: "Late answer", cached: false });
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+
+      expect(chat.ask).toHaveBeenCalledTimes(1);
+    });
   });
 });

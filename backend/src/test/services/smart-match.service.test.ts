@@ -532,4 +532,331 @@ describe("SmartMatch profile deletion", () => {
     expect(mocks.reserve).not.toHaveBeenCalled();
     expect(mocks.fetch).not.toHaveBeenCalled();
   });
+
+  describe("SmartMatch streamed question accounting", () => {
+    const question = "Explain my fit for this job.";
+    const answer = {
+      scope: "job_related",
+      answer: "Highlight your React experience.",
+    };
+
+    function prepareStreamQuestion(cached?: unknown) {
+      mocks.select
+        .mockReturnValueOnce(
+          selectRows([
+            {
+              profile,
+              updatedAt: "2026-10-13T00:00:00.000Z",
+            },
+          ]),
+        )
+        .mockReturnValueOnce(selectRows([job]))
+        .mockReturnValueOnce(
+          selectRows(cached === undefined ? [] : [{ payload: cached }]),
+        );
+    }
+
+    function terminalResponse(
+      value: unknown,
+      status = "completed",
+      reportedUsage: unknown = tokens,
+    ) {
+      return {
+        status,
+        usage: reportedUsage,
+        output: [
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: JSON.stringify(value),
+              },
+            ],
+          },
+        ],
+      };
+    }
+
+    function providerStream(
+      parts: string[],
+      terminal: ReturnType<typeof terminalResponse> | null,
+    ) {
+      const encoder = new TextEncoder();
+
+      function frame(value: unknown) {
+        return encoder.encode(`data: ${JSON.stringify(value)}\n\n`);
+      }
+
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            for (const part of parts) {
+              controller.enqueue(
+                frame({
+                  type: "response.output_text.delta",
+                  delta: part,
+                  item_id: "msg_service_test",
+                  output_index: 0,
+                  content_index: 0,
+                }),
+              );
+            }
+
+            if (terminal) {
+              controller.enqueue(
+                frame({
+                  type: `response.${terminal.status}`,
+                  response: terminal,
+                }),
+              );
+            }
+
+            controller.close();
+          },
+        }),
+        {
+          headers: {
+            "Content-Type": "text/event-stream",
+          },
+        },
+      );
+    }
+
+    it("streams answer text while retaining reservation and settlement ordering", async () => {
+      prepareStreamQuestion();
+
+      mocks.fetch.mockResolvedValue(
+        providerStream(
+          [
+            '{"scope":"job_related","answer":"Highlight ',
+            'your React experience."}',
+          ],
+          terminalResponse(answer),
+        ),
+      );
+
+      const onDelta = vi.fn();
+
+      await expect(
+        answerSmartMatchQuestion("clerk-user", job.id, question, onDelta),
+      ).resolves.toMatchObject({
+        answer: answer.answer,
+        cached: false,
+        usage,
+      });
+
+      expect(onDelta.mock.calls.map(([text]) => text).join("")).toBe(
+        answer.answer,
+      );
+
+      expect(mocks.reserve).toHaveBeenCalledWith(
+        userId,
+        expect.any(String),
+        "answer",
+        expect.any(Object),
+      );
+
+      expect(mocks.settle).toHaveBeenCalledExactlyOnceWith(
+        mocks.reserve.mock.calls[0]![1],
+        tokens,
+      );
+
+      const body = JSON.parse(mocks.fetch.mock.calls[0]![1].body) as Record<
+        string,
+        unknown
+      >;
+
+      expect(body.stream).toBe(true);
+      expect(body.store).toBe(false);
+
+      expect(mocks.reserve.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.fetch.mock.invocationCallOrder[0],
+      );
+      expect(mocks.settle.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.execute.mock.invocationCallOrder[0],
+      );
+      expect(mocks.execute).toHaveBeenCalledTimes(1);
+      expect(mocks.remove).toHaveBeenCalledTimes(1);
+    });
+
+    it("uses a valid cached answer without a new AI request or reservation", async () => {
+      prepareStreamQuestion(answer);
+
+      const onDelta = vi.fn();
+
+      await expect(
+        answerSmartMatchQuestion("clerk-user", job.id, question, onDelta),
+      ).resolves.toMatchObject({
+        answer: answer.answer,
+        cached: true,
+        usage,
+      });
+
+      expect(onDelta).not.toHaveBeenCalled();
+      expect(mocks.reserve).not.toHaveBeenCalled();
+      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(mocks.settle).not.toHaveBeenCalled();
+    });
+
+    it("does not contact AI when a streaming reservation is rejected", async () => {
+      prepareStreamQuestion();
+
+      mocks.reserve.mockRejectedValue(
+        new SmartMatchError(429, "Daily AI limit reached."),
+      );
+
+      await expect(
+        answerSmartMatchQuestion("clerk-user", job.id, question, vi.fn()),
+      ).rejects.toMatchObject({
+        status: 429,
+        message: "Daily AI limit reached.",
+      });
+
+      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(mocks.settle).not.toHaveBeenCalled();
+      expect(mocks.execute).not.toHaveBeenCalled();
+    });
+
+    it.each(["incomplete", "failed"])(
+      "settles reported usage but never caches a %s stream",
+      async (status) => {
+        prepareStreamQuestion();
+
+        mocks.fetch.mockResolvedValue(
+          providerStream(
+            ['{"scope":"job_related","answer":"Partial'],
+            terminalResponse(answer, status),
+          ),
+        );
+
+        await expect(
+          answerSmartMatchQuestion("clerk-user", job.id, question, vi.fn()),
+        ).rejects.toMatchObject({ status: 502 });
+
+        expect(mocks.settle).toHaveBeenCalledExactlyOnceWith(
+          expect.any(String),
+          tokens,
+        );
+        expect(mocks.execute).not.toHaveBeenCalled();
+        expect(mocks.remove).toHaveBeenCalledTimes(1);
+        expect(mocks.fetch).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it("keeps usage unknown after an interrupted stream and does not retry AI", async () => {
+      prepareStreamQuestion();
+
+      mocks.fetch.mockResolvedValue(
+        providerStream(['{"scope":"job_related","answer":"Unfinished'], null),
+      );
+
+      await expect(
+        answerSmartMatchQuestion("clerk-user", job.id, question, vi.fn()),
+      ).rejects.toMatchObject({ status: 502 });
+
+      expect(mocks.settle).toHaveBeenCalledExactlyOnceWith(
+        expect.any(String),
+        null,
+      );
+      expect(mocks.fetch).toHaveBeenCalledTimes(1);
+      expect(mocks.execute).not.toHaveBeenCalled();
+      expect(mocks.remove).toHaveBeenCalledTimes(1);
+    });
+
+    it("settles usage before rejecting an invalid completed answer", async () => {
+      prepareStreamQuestion();
+
+      mocks.fetch.mockResolvedValue(
+        providerStream(
+          ['{"scope":"job_related","answer":"Provisional"}'],
+          terminalResponse({
+            scope: "job_related",
+            answer: 123,
+          }),
+        ),
+      );
+
+      await expect(
+        answerSmartMatchQuestion("clerk-user", job.id, question, vi.fn()),
+      ).rejects.toMatchObject({ status: 502 });
+
+      expect(mocks.settle).toHaveBeenCalledExactlyOnceWith(
+        expect.any(String),
+        tokens,
+      );
+      expect(mocks.execute).not.toHaveBeenCalled();
+    });
+
+    it("does not emit model-classified out-of-scope answer text", async () => {
+      prepareStreamQuestion();
+
+      const classified = {
+        scope: "out_of_scope",
+        answer: "",
+      };
+      const onDelta = vi.fn();
+
+      mocks.fetch.mockResolvedValue(
+        providerStream(
+          [JSON.stringify(classified)],
+          terminalResponse(classified),
+        ),
+      );
+
+      await expect(
+        answerSmartMatchQuestion(
+          "clerk-user",
+          job.id,
+          "Tell me a joke.",
+          onDelta,
+        ),
+      ).resolves.toMatchObject({
+        answer: OUT_OF_SCOPE_MESSAGE,
+        outOfScope: true,
+        cached: false,
+      });
+
+      expect(onDelta).not.toHaveBeenCalled();
+      expect(mocks.settle).toHaveBeenCalledExactlyOnceWith(
+        expect.any(String),
+        tokens,
+      );
+    });
+
+    it("does not emit or spend allowance for obvious generic coding questions", async () => {
+      prepareStreamQuestion();
+
+      const onDelta = vi.fn();
+
+      await answerSmartMatchQuestion(
+        "clerk-user",
+        job.id,
+        "What is the <p> tag and <div>?",
+        onDelta,
+      );
+
+      expect(onDelta).not.toHaveBeenCalled();
+      expect(mocks.reserve).not.toHaveBeenCalled();
+      expect(mocks.fetch).not.toHaveBeenCalled();
+    });
+
+    it("does not interpret missing terminal usage as zero", async () => {
+      prepareStreamQuestion();
+
+      mocks.fetch.mockResolvedValue(
+        providerStream(
+          [JSON.stringify(answer)],
+          terminalResponse(answer, "completed", null),
+        ),
+      );
+
+      await answerSmartMatchQuestion("clerk-user", job.id, question, vi.fn());
+
+      expect(mocks.settle).toHaveBeenCalledExactlyOnceWith(
+        expect.any(String),
+        null,
+      );
+    });
+  });
 });
