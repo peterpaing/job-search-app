@@ -74,23 +74,23 @@ async function startHarness() {
     let finishHttp;
     let finishTasks;
 
-    const server = new EventEmitter();
+    const fakeServer = new EventEmitter();
 
-    server.close = (callback) => {
+    fakeServer.close = (callback) => {
       finishHttp = callback;
       process.send("http-closing");
     };
 
-    server.closeIdleConnections = () => {
+    fakeServer.closeIdleConnections = () => {
       process.send("idle-connections-closed");
     };
 
-    server.closeAllConnections = () => {
+    fakeServer.closeAllConnections = () => {
       process.send("all-connections-closed");
     };
 
     globalThis.__shutdownHarness = {
-      server,
+      server: fakeServer,
       tasks: new Promise((resolve) => {
         finishTasks = resolve;
       })
@@ -110,7 +110,7 @@ async function startHarness() {
       }
 
       if (command === "listener-error") {
-        server.emit("error", Object.assign(
+        fakeServer.emit("error", Object.assign(
           new Error("Listener failed"),
           { code: "EADDRINUSE" }
         ));
