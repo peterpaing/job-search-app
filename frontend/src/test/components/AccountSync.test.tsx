@@ -428,17 +428,38 @@ describe("AccountSync", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("navigates after a 410 even when the old session is already invalid", async () => {
+  it("does not reload repeatedly when sign-out fails and the session remains active", async () => {
     mocks.fetch.mockResolvedValue({ ok: false, status: 410 });
-    mocks.signOut.mockRejectedValue(new Error("Session already deleted"));
+    mocks.signOut.mockRejectedValue(new Error("Sign-out connection failed"));
+
+    render(<AccountSync />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "we couldn’t sign you out",
+    );
+
+    expect(mocks.signOut).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "session_test",
+    });
+    expect(mocks.replaceLocation).not.toHaveBeenCalled();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("can navigate if a failed sign-out request leaves no active session", async () => {
+    mocks.fetch.mockResolvedValue({ ok: false, status: 410 });
+
+    mocks.signOut.mockImplementation(async () => {
+      syncClerk.session = null;
+      throw new Error("Session already removed");
+    });
 
     render(<AccountSync />);
 
     await waitFor(() => {
-      expect(mocks.replaceLocation).toHaveBeenCalledTimes(1);
+      expect(mocks.replaceLocation).toHaveBeenCalledExactlyOnceWith(
+        new URL("/", window.location.origin).href,
+      );
     });
-
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("does not sign out a replacement session for an old 410 response", async () => {

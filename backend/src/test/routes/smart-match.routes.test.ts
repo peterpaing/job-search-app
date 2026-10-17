@@ -70,6 +70,36 @@ const endpoints = [
 ] as const;
 
 describe("SmartMatch routes", () => {
+  it("allows a signed-in non-Pro user to delete their own SmartMatch data", async () => {
+    mocks.hasPremium.mockResolvedValue(false);
+    mocks.storeProfile.mockResolvedValue({
+      profile: null,
+      usage: {},
+    });
+
+    const result = await request(app).delete(
+      "/api/smart-match/profile?userId=forged",
+    );
+
+    expect(result.status).toBe(200);
+    expect(mocks.storeProfile).toHaveBeenCalledExactlyOnceWith(
+      "user_verified",
+      null,
+    );
+    expect(mocks.hasPremium).not.toHaveBeenCalled();
+  });
+
+  it("still rejects signed-out SmartMatch data deletion", async () => {
+    mocks.getAuth.mockReturnValue({
+      isAuthenticated: false,
+      userId: null,
+    });
+
+    const result = await request(app).delete("/api/smart-match/profile");
+
+    expect(result.status).toBe(401);
+    expect(mocks.storeProfile).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.resetAllMocks();
 
@@ -194,7 +224,11 @@ describe("SmartMatch routes", () => {
     expect(mocks.bootstrap).not.toHaveBeenCalled();
   });
 
-  it.each(endpoints)("blocks non-premium %s %s", async (method, path) => {
+  it.each(
+    endpoints.filter(
+      ([method, path]) => !(method === "delete" && path === "/profile"),
+    ),
+  )("blocks non-premium %s %s", async (method, path) => {
     mocks.hasPremium.mockResolvedValue(false);
 
     const result = await request(app)

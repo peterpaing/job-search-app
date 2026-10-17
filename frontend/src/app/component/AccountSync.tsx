@@ -72,7 +72,26 @@ export default function AccountSync() {
               sessionId: activeSessionId,
             });
           } catch {
-            // The deleted account's session may already be gone.
+            if (
+              cancelled ||
+              (clerk.session && clerk.session.id !== activeSessionId)
+            ) {
+              return;
+            }
+
+            // A failed request is not proof that sign-out succeeded.
+            // Leave the existing retry control available instead of
+            // reloading into another automatic sign-out attempt.
+            if (clerk.session?.id === activeSessionId) {
+              setSyncError({
+                sessionId: activeSessionId,
+                message:
+                  "Your account deletion was requested, but we couldn’t sign you out. Check your connection and try again.",
+              });
+              return;
+            }
+
+            // If the session is already gone, navigation is safe.
           }
 
           if (

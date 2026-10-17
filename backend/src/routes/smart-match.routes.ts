@@ -108,7 +108,41 @@ export function createSmartMatchRouter(frontendOrigin: string) {
       next(error);
     }
   });
+  // Authentication and account-deletion checks already ran above.
+  // Removing a user's own data must not require a paid subscription.
+  router.delete("/profile", async (_req, res, next) => {
+    try {
+      const service = await import("../services/smart-match.service.js");
 
+      res.json(
+        await service.storeSmartMatchProfile(
+          res.locals.clerkUserId as string,
+          null,
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Keep all other SmartMatch operations protected by Pro.
+  router.use(async (_req, res, next) => {
+    try {
+      const { hasSmartMatchAccess: hasPremium } =
+        await import("../services/smart-match.owner.js");
+
+      if (!(await hasPremium(res.locals.clerkUserId as string))) {
+        res.status(403).json({
+          message: "An active, paid StackWing Pro subscription is required.",
+        });
+        return;
+      }
+
+      next();
+    } catch (error) {
+      next(error);
+    }
+  });
   router.use(async (_req, res, next) => {
     try {
       const { hasSmartMatchAccess: hasPremium } =
@@ -157,21 +191,6 @@ export function createSmartMatchRouter(frontendOrigin: string) {
         await service.storeSmartMatchProfile(
           res.locals.clerkUserId as string,
           parsed.data,
-        ),
-      );
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.delete("/profile", async (_req, res, next) => {
-    try {
-      const service = await import("../services/smart-match.service.js");
-
-      res.json(
-        await service.storeSmartMatchProfile(
-          res.locals.clerkUserId as string,
-          null,
         ),
       );
     } catch (error) {
