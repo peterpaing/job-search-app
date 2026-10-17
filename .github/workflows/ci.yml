@@ -9,12 +9,14 @@ on:
     branches:
       - main
 
+  workflow_dispatch:
+
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   frontend:
@@ -103,8 +105,282 @@ jobs:
       - name: Check TypeScript
         run: npm run typecheck
 
+      - name: Check test TypeScript
+        run: npx tsc --project src/test/tsconfig.json --noEmit
+
       - name: Run unit tests
-        run: npx vitest run --exclude "src/test/integration/**"
+        run: npx vitest run --exclude "src/test/integration/**" --maxWorkers=2
 
       - name: Build backend
         run: npm run build
+
+  publish-images:
+    name: Publish Docker images
+    needs:
+      - frontend
+      - backend
+
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      vars.PUBLISH_DOCKER_IMAGES == 'true'
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      backend-image: ${{ steps.names.outputs.backend }}
+      frontend-image: ${{ steps.names.outputs.frontend }}
+      backend-digest: ${{ steps.backend-image.outputs.digest }}
+      frontend-digest: ${{ steps.frontend-image.outputs.digest }}
+
+    steps:
+      - name: Checkout checked commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set image names
+        id: names
+        shell: bash
+        run: |
+          repository="${GITHUB_REPOSITORY,,}"
+          echo "backend=ghcr.io/${repository}/backend" >> "$GITHUB_OUTPUT"
+          echo "frontend=ghcr.io/${repository}/frontend" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish backend
+        id: backend-image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.names.outputs.backend }}:sha-${{ github.sha }}
+            ${{ steps.names.outputs.backend }}:main
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Validate frontend build configuration
+        if: vars.PUBLISH_FRONTEND_IMAGE == 'true'
+        env:
+          CLERK_PUBLIC_KEY: ${{ vars.PROD_CLERK_PUBLISHABLE_KEY }}
+          API_BASE_URL: ${{ vars.PROD_API_BASE_URL }}
+          DELETION_ENABLED: ${{ vars.PROD_ACCOUNT_DELETION_ENABLED }}
+        run: |
+          node --input-type=module <<'NODE'
+          const key = process.env.CLERK_PUBLIC_KEY ?? "";
+          const api = process.env.API_BASE_URL ?? "";
+          const deletion = process.env.DELETION_ENABLED ?? "";
+
+          if (!/^pk_(test|live)_/.test(key)) {
+            throw new Error("Configure PROD_CLERK_PUBLISHABLE_KEY.");
+          }
+
+          let url;
+
+          try {
+            url = new URL(api);
+          } catch {
+            throw new Error("Configure PROD_API_BASE_URL.");
+          }
+
+          if (
+            url.protocol !== "https:" ||
+            url.username ||
+            url.password ||
+            url.pathname !== "/" ||
+            url.search ||
+            url.hash
+          ) {
+            throw new Error(
+              "PROD_API_BASE_URL must be an HTTPS origin without a path."
+            );
+          }
+
+          if (!["true", "false"].includes(deletion)) {
+            throw new Error(
+              "Set PROD_ACCOUNT_DELETION_ENABLED to true or false."
+            );
+          }
+          NODE
+
+      - name: Build and publish frontend
+        id: frontend-image
+        if: vars.PUBLISH_FRONTEND_IMAGE == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.names.outputs.frontend }}:sha-${{ github.sha }}
+            ${{ steps.names.outputs.frontend }}:main
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ vars.PROD_CLERK_PUBLISHABLE_KEY }}
+            NEXT_PUBLIC_API_BASE_URL=${{ vars.PROD_API_BASE_URL }}
+            NEXT_PUBLIC_SUPPORT_EMAIL=${{ vars.PROD_SUPPORT_EMAIL }}
+            NEXT_PUBLIC_ACCOUNT_DELETION_ENABLED=${{ vars.PROD_ACCOUNT_DELETION_ENABLED }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+  deploy:
+    name: Request Render deployments
+    needs:
+      - publish-images
+
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      vars.RENDER_CD_ENABLED == 'true' &&
+      needs.publish-images.outputs.backend-digest != '' &&
+      needs.publish-images.outputs.frontend-digest != ''
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Deploy exact published images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BACKEND_HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
+          FRONTEND_HOOK: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}
+          BACKEND_IMAGE: ${{ needs.publish-images.outputs.backend-image }}
+          FRONTEND_IMAGE: ${{ needs.publish-images.outputs.frontend-image }}
+          BACKEND_DIGEST: ${{ needs.publish-images.outputs.backend-digest }}
+          FRONTEND_DIGEST: ${{ needs.publish-images.outputs.frontend-digest }}
+        run: |
+          node --input-type=module <<'NODE'
+          async function main() {
+            const currentCommit = await fetch(
+              `${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}/git/ref/heads/main`,
+              {
+                headers: {
+                  Authorization: `Bearer ${process.env.GH_TOKEN}`,
+                  Accept: "application/vnd.github+json",
+                },
+                signal: AbortSignal.timeout(30_000),
+              },
+            );
+
+            if (!currentCommit.ok) {
+              throw new Error("Unable to check the current main commit.");
+            }
+
+            const ref = await currentCommit.json();
+
+            if (ref.object?.sha !== process.env.GITHUB_SHA) {
+              console.log("Skipping deployment: main has a newer commit.");
+              return;
+            }
+
+            const targets = [
+              {
+                name: "backend",
+                hook: process.env.BACKEND_HOOK,
+                image: process.env.BACKEND_IMAGE,
+                digest: process.env.BACKEND_DIGEST,
+              },
+              {
+                name: "frontend",
+                hook: process.env.FRONTEND_HOOK,
+                image: process.env.FRONTEND_IMAGE,
+                digest: process.env.FRONTEND_DIGEST,
+              },
+            ];
+
+            // Validate both before triggering either.
+            for (const target of targets) {
+              let url;
+
+              try {
+                url = new URL(target.hook);
+              } catch {
+                throw new Error(`Configure the ${target.name} deploy hook.`);
+              }
+
+              if (
+                url.protocol !== "https:" ||
+                url.hostname !== "api.render.com" ||
+                url.port ||
+                url.username ||
+                url.password ||
+                !url.pathname.startsWith("/deploy/")
+              ) {
+                throw new Error(`Invalid ${target.name} deploy hook.`);
+              }
+
+              if (!/^sha256:[a-f0-9]{64}$/.test(target.digest ?? "")) {
+                throw new Error(`Missing ${target.name} image digest.`);
+              }
+
+              url.searchParams.set(
+                "imgURL",
+                `${target.image}@${target.digest}`,
+              );
+
+              target.url = url;
+            }
+
+            for (const target of targets) {
+              let response;
+
+              try {
+                response = await fetch(target.url, {
+                  method: "POST",
+                  redirect: "error",
+                  signal: AbortSignal.timeout(30_000),
+                });
+              } catch {
+                throw new Error(
+                  `Unable to request ${target.name} deployment.`,
+                );
+              }
+
+              if (![200, 202].includes(response.status)) {
+                throw new Error(
+                  `${target.name} deployment request failed: HTTP ${response.status}.`,
+                );
+              }
+
+              console.log(
+                `${target.name} deployment requested for ${target.digest}.`,
+              );
+            }
+          }
+
+          main().catch((error) => {
+            console.error(error.message);
+            process.exitCode = 1;
+          });
+          NODE
