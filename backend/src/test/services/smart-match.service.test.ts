@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as runtime from "../../runtime.js";
 
 const mocks = vi.hoisted(() => ({
   select: vi.fn(),
@@ -857,6 +858,174 @@ describe("SmartMatch profile deletion", () => {
         expect.any(String),
         null,
       );
+    });
+  });
+  describe("SmartMatch concurrency and shutdown", () => {
+    beforeEach(() => {
+      vi.stubEnv("SMARTMATCH_MAX_CONCURRENT", "1");
+      vi.spyOn(runtime, "isShuttingDown").mockReturnValue(false);
+    });
+
+    it("rejects excess work before reserving additional AI allowance", async () => {
+      let release!: (value: ReturnType<typeof providerResponse>) => void;
+
+      mocks.fetch.mockImplementationOnce(
+        () =>
+          new Promise<ReturnType<typeof providerResponse>>((resolve) => {
+            release = resolve;
+          }),
+      );
+
+      const first = extractSmartMatchProfile("clerk-first", resumeText);
+
+      // Attach rejection handling immediately for safe cleanup.
+      const settledFirst = Promise.allSettled([first]);
+
+      try {
+        await vi.waitFor(() => {
+          expect(mocks.fetch).toHaveBeenCalledOnce();
+        });
+
+        await expect(
+          extractSmartMatchProfile("clerk-second", resumeText),
+        ).rejects.toMatchObject({
+          status: 503,
+          message: "AI is busy. Please try again shortly.",
+        });
+
+        expect(mocks.reserve).toHaveBeenCalledOnce();
+        expect(mocks.fetch).toHaveBeenCalledOnce();
+
+        release(providerResponse());
+
+        await expect(first).resolves.toMatchObject({
+          draft: profile,
+        });
+
+        await expect(
+          extractSmartMatchProfile("clerk-third", resumeText),
+        ).resolves.toMatchObject({
+          draft: profile,
+        });
+
+        expect(mocks.fetch).toHaveBeenCalledTimes(2);
+      } finally {
+        release?.(providerResponse());
+        await settledFirst;
+      }
+    });
+
+    it("releases the concurrency slot after provider failure", async () => {
+      mocks.fetch.mockRejectedValueOnce(new Error("Provider unavailable"));
+
+      await expect(
+        extractSmartMatchProfile("clerk-first", resumeText),
+      ).rejects.toMatchObject({
+        status: 502,
+      });
+
+      await expect(
+        extractSmartMatchProfile("clerk-second", resumeText),
+      ).resolves.toMatchObject({
+        draft: profile,
+      });
+
+      expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("releases the slot when budget reservation fails", async () => {
+      mocks.reserve.mockRejectedValueOnce(
+        new SmartMatchError(429, "Monthly allowance reached."),
+      );
+
+      await expect(
+        extractSmartMatchProfile("clerk-first", resumeText),
+      ).rejects.toMatchObject({
+        status: 429,
+      });
+
+      expect(mocks.fetch).not.toHaveBeenCalled();
+
+      await expect(
+        extractSmartMatchProfile("clerk-second", resumeText),
+      ).resolves.toMatchObject({
+        draft: profile,
+      });
+
+      expect(mocks.fetch).toHaveBeenCalledOnce();
+    });
+
+    it("does not reserve allowance or contact AI during shutdown", async () => {
+      vi.mocked(runtime.isShuttingDown).mockReturnValue(true);
+
+      await expect(
+        extractSmartMatchProfile("clerk-user", resumeText),
+      ).rejects.toMatchObject({
+        status: 503,
+        message: "AI is restarting. Please try again shortly.",
+      });
+
+      expect(mocks.reserve).not.toHaveBeenCalled();
+      expect(mocks.fetch).not.toHaveBeenCalled();
+    });
+
+    it.each(["0", "-1", "1.5", "101", "invalid"])(
+      "rejects invalid concurrency configuration: %s",
+      async (value) => {
+        vi.stubEnv("SMARTMATCH_MAX_CONCURRENT", value);
+
+        await expect(
+          extractSmartMatchProfile("clerk-user", resumeText),
+        ).rejects.toMatchObject({
+          status: 503,
+          message: "SmartMatch configuration needs attention.",
+        });
+
+        expect(mocks.reserve).not.toHaveBeenCalled();
+        expect(mocks.fetch).not.toHaveBeenCalled();
+      },
+    );
+
+    it("keeps generation tracked until accounting and cleanup finish", async () => {
+      let release!: (value: ReturnType<typeof providerResponse>) => void;
+
+      mocks.fetch.mockImplementationOnce(
+        () =>
+          new Promise<ReturnType<typeof providerResponse>>((resolve) => {
+            release = resolve;
+          }),
+      );
+
+      const generation = extractSmartMatchProfile("clerk-user", resumeText);
+      const settledGeneration = Promise.allSettled([generation]);
+
+      try {
+        await vi.waitFor(() => {
+          expect(mocks.fetch).toHaveBeenCalledOnce();
+        });
+
+        let idle = false;
+
+        const waiting = runtime.waitForTasks().then(() => {
+          idle = true;
+        });
+
+        await Promise.resolve();
+
+        expect(idle).toBe(false);
+
+        release(providerResponse());
+
+        await generation;
+        await waiting;
+
+        expect(idle).toBe(true);
+        expect(mocks.settle).toHaveBeenCalledOnce();
+        expect(mocks.remove).toHaveBeenCalledOnce();
+      } finally {
+        release?.(providerResponse());
+        await settledGeneration;
+      }
     });
   });
 });

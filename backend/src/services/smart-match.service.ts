@@ -38,6 +38,7 @@ import {
   type TokenUsage,
 } from "./smart-match.costs.js";
 import { readSmartMatchStream } from "./smart-match.stream.js";
+import { isShuttingDown, trackTask } from "../runtime.js";
 
 const responseSchema = z.object({
   status: z.string(),
@@ -207,8 +208,57 @@ async function readCache(userId: string, key: string) {
 
   return record?.payload;
 }
+let activeAiOperations = 0;
+
+function maxConcurrentAiOperations(): number {
+  const value = Number(process.env.SMARTMATCH_MAX_CONCURRENT ?? "10");
+
+  if (!Number.isSafeInteger(value) || value < 1 || value > 100) {
+    throw new SmartMatchError(503, "SmartMatch configuration needs attention.");
+  }
+
+  return value;
+}
 
 async function generate<T>(
+  userId: string,
+  key: string,
+  kind: "extract" | "answer",
+  input: unknown,
+  jsonSchema: Record<string, unknown>,
+  validator: z.ZodType<T>,
+  onDelta?: (delta: string) => void,
+) {
+  if (isShuttingDown()) {
+    throw new SmartMatchError(
+      503,
+      "AI is restarting. Please try again shortly.",
+    );
+  }
+
+  if (activeAiOperations >= maxConcurrentAiOperations()) {
+    throw new SmartMatchError(503, "AI is busy. Please try again shortly.");
+  }
+
+  activeAiOperations += 1;
+
+  try {
+    return await trackTask(() =>
+      generateInternal(
+        userId,
+        key,
+        kind,
+        input,
+        jsonSchema,
+        validator,
+        onDelta,
+      ),
+    );
+  } finally {
+    activeAiOperations -= 1;
+  }
+}
+async function generateInternal<T>(
   userId: string,
   key: string,
   kind: "extract" | "answer",

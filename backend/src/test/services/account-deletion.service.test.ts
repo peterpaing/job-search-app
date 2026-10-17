@@ -1,6 +1,7 @@
 import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as runtime from "../../runtime.js";
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -682,5 +683,78 @@ describe("account deletion service", () => {
 
     expect(mocks.deleteUser).toHaveBeenCalledWith(clerkId);
     expect(events).toContain("finish");
+  });
+  it("does not claim queued deletions after shutdown starts", async () => {
+    vi.spyOn(runtime, "isShuttingDown").mockReturnValue(true);
+
+    pending = [{ user_id: userId }];
+
+    await processPendingAccountDeletions();
+
+    // Only the pending-jobs SELECT ran; no job was claimed.
+    expect(mocks.execute).toHaveBeenCalledOnce();
+    expect(mocks.deleteUser).not.toHaveBeenCalled();
+    expect(events).not.toContain("finish");
+  });
+
+  it("stops picking the next queued deletion when shutdown begins", async () => {
+    vi.spyOn(runtime, "isShuttingDown")
+      .mockReturnValueOnce(false)
+      .mockReturnValue(true);
+
+    const nextUserId = "00000000-0000-4000-8000-000000000002";
+
+    mocks.execute
+      .mockResolvedValueOnce({
+        rows: [{ user_id: userId }, { user_id: nextUserId }],
+      })
+      .mockResolvedValueOnce({
+        // First job was already claimed elsewhere.
+        rows: [],
+      });
+
+    await processPendingAccountDeletions();
+
+    // Pending-jobs SELECT + first claim, but no second claim.
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+    expect(mocks.deleteUser).not.toHaveBeenCalled();
+  });
+
+  it("tracks a deletion started outside the polling worker", async () => {
+    let release!: (value: { rows: unknown[] }) => void;
+
+    mocks.execute.mockImplementationOnce(
+      () =>
+        new Promise<{ rows: unknown[] }>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const processing = processAccountDeletion(userId);
+    const settledProcessing = Promise.allSettled([processing]);
+
+    let idle = false;
+
+    const waiting = runtime.waitForTasks().then(() => {
+      idle = true;
+    });
+
+    try {
+      await Promise.resolve();
+
+      expect(idle).toBe(false);
+
+      // An empty claim is a normal, already-owned/no-op result.
+      release({ rows: [] });
+
+      await processing;
+      await waiting;
+
+      expect(idle).toBe(true);
+      expect(mocks.deleteUser).not.toHaveBeenCalled();
+    } finally {
+      release?.({ rows: [] });
+      await settledProcessing;
+    }
   });
 });

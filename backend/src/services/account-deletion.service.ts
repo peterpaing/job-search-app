@@ -15,6 +15,7 @@ import {
   accountDeletionEnabled,
   clerkIdentityHash,
 } from "./account-deletion.state.js";
+import { isShuttingDown, trackTask } from "../runtime.js";
 
 type BillingCustomer = {
   userId: string;
@@ -423,7 +424,11 @@ export async function stopAccountBillingForCustomer(
   }
 }
 
-export async function processAccountDeletion(userId: string) {
+export async function processAccountDeletion(userId: string): Promise<void> {
+  return trackTask(() => processAccountDeletionInternal(userId));
+}
+
+async function processAccountDeletionInternal(userId: string) {
   const owner = randomUUID();
 
   const claimed = await db.execute(sql`
@@ -676,6 +681,10 @@ export async function processPendingAccountDeletions() {
   const jobs = z.array(z.object({ user_id: z.uuid() })).parse(pending.rows);
 
   for (const job of jobs) {
+    if (isShuttingDown()) {
+      break;
+    }
+
     await processAccountDeletion(job.user_id);
   }
 }
