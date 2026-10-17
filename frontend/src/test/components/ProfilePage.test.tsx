@@ -60,6 +60,17 @@ vi.mock("@clerk/nextjs", () => {
   return {
     useUser: mocks.useUser,
 
+    useAuth: () => {
+      const clerk = mocks.useClerk();
+
+      return {
+        isLoaded: true,
+        isSignedIn: Boolean(clerk?.user && clerk?.session),
+        userId: clerk?.user?.id ?? null,
+        sessionId: clerk?.session?.id ?? null,
+      };
+    },
+
     // These component tests do not exercise Clerk's real
     // reverification UI or backend verification.
     useClerk: mocks.useClerk,
@@ -717,21 +728,25 @@ describe("ProfilePage", () => {
       );
     });
 
-    it("still navigates if the deleted session cannot be signed out again", async () => {
+    it("keeps the accepted request saved without reloading after a genuine sign-out failure", async () => {
       mocks.clerkSignOut.mockRejectedValue(
-        new Error("Session already removed"),
+        new Error("Sign-out connection failed"),
       );
 
       renderSignedInProfile();
       await clickDelete();
 
-      await waitFor(() => {
-        expect(mocks.replaceLocation).toHaveBeenCalledTimes(1);
-      });
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Your deletion request is saved, but we couldn’t sign you out.",
+      );
 
-      expect(mocks.clerkSignOut).toHaveBeenCalledWith({
+      expect(mocks.clerkSignOut).toHaveBeenCalledExactlyOnceWith({
         sessionId: "session_profile_test",
       });
+      expect(mocks.replaceLocation).not.toHaveBeenCalled();
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Your deletion request is saved.",
+      );
     });
 
     it("navigates when sign-out removes the current session", async () => {

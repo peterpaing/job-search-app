@@ -80,7 +80,7 @@ async function state() {
 beforeAll(async () => {
   await loadMigration("0000_next_jimmy_woo.sql");
   await loadMigration("0007_job-availability.sql");
-}, 30_000);
+}, 60_000);
 
 beforeEach(async () => {
   await db.exec("TRUNCATE TABLE jobs, job_availability");

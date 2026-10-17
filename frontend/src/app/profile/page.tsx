@@ -9,6 +9,7 @@ import {
   useUser,
 } from "@clerk/nextjs";
 import { isReverificationCancelledError } from "@clerk/nextjs/errors";
+import DeleteSmartMatchData from "../component/DeleteSmartMatchData";
 import Link from "next/link";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
@@ -108,6 +109,8 @@ function Privacy() {
           <p className="text-muted mt-2 text-sm leading-relaxed">
             StackWing does not currently provide a public member profile page.
             Your account panel is intended for you to manage your own account.
+            Your saved jobs, applications, developer profile, and cached AI
+            results are associated with your account.
           </p>
         </div>
 
@@ -119,6 +122,15 @@ function Privacy() {
         </div>
 
         <div>
+          <h3 className="text-sm font-semibold">SmartMatch and AI</h3>
+          <p className="text-muted mt-2 text-sm leading-relaxed">
+            When you request resume extraction and confirm consent, the text you
+            provide is sent to OpenAI to generate a draft developer profile.
+            StackWing does not save the raw resume text in its database.
+          </p>
+        </div>
+
+        <div>
           <h3 className="text-sm font-semibold">Payments and subscriptions</h3>
           <p className="text-muted mt-2 text-sm leading-relaxed">
             Stripe handles payment details and subscription billing. StackWing
@@ -126,6 +138,7 @@ function Privacy() {
             access, but does not store your card details.
           </p>
         </div>
+        <DeleteSmartMatchData />
       </div>
     </AccountSection>
   );
@@ -352,12 +365,33 @@ function DeleteAccount() {
           sessionId: expectedSessionId,
         });
       } catch {
-        // The cleanup worker may already have removed this session.
-      } finally {
-        // Do not interrupt a different account selected during deletion.
-        if (!clerk.session || clerk.session.id === expectedSessionId) {
-          window.location.replace(new URL("/", window.location.origin).href);
+        const replacementAccount =
+          (clerk.user && clerk.user.id !== expectedUserId) ||
+          (clerk.session && clerk.session.id !== expectedSessionId);
+
+        if (replacementAccount) {
+          return;
         }
+
+        if (clerk.session?.id === expectedSessionId) {
+          if (mounted.current) {
+            setError(
+              "Your deletion request is saved, but we couldn’t sign you out. Check your connection, then open the Sign out section and try again.",
+            );
+          }
+
+          return;
+        }
+
+        // The worker may already have removed the session.
+      }
+
+      const replacementAccount =
+        (clerk.user && clerk.user.id !== expectedUserId) ||
+        (clerk.session && clerk.session.id !== expectedSessionId);
+
+      if (!replacementAccount) {
+        window.location.replace(new URL("/", window.location.origin).href);
       }
     } catch (failure) {
       if (mounted.current && !isReverificationCancelledError(failure)) {
