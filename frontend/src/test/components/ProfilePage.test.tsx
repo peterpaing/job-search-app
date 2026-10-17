@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   routerReplace: vi.fn(),
   routerRefresh: vi.fn(),
+  useClerk: vi.fn(),
+  reverify: vi.fn(),
+  isCancelled: vi.fn(),
+  replaceLocation: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -56,20 +60,15 @@ vi.mock("@clerk/nextjs", () => {
   return {
     useUser: mocks.useUser,
 
-    useClerk: () => ({
-      user: {
-        id: "user_profile_test",
-      },
-      session: {
-        id: "session_profile_test",
-        getToken: mocks.getToken,
-      },
-      signOut: mocks.clerkSignOut,
-    }),
-
     // These component tests do not exercise Clerk's real
     // reverification UI or backend verification.
-    useReverification: (fetcher: unknown) => fetcher,
+    useClerk: mocks.useClerk,
+
+    // Exercise our handling without opening Clerk's real verification UI.
+    useReverification:
+      (fetcher: (...args: string[]) => Promise<unknown>) =>
+      (...args: string[]) =>
+        mocks.reverify(fetcher, ...args),
 
     SignIn: (props: unknown) => {
       mocks.signIn(props);
@@ -95,6 +94,19 @@ vi.mock("@clerk/nextjs", () => {
   };
 });
 
+vi.mock("@clerk/nextjs/errors", () => ({
+  isReverificationCancelledError: mocks.isCancelled,
+}));
+
+let profileClerk: {
+  user: { id: string } | null;
+  session: {
+    id: string;
+    getToken: typeof mocks.getToken;
+  } | null;
+  signOut: typeof mocks.clerkSignOut;
+};
+
 function renderSignedInProfile() {
   mocks.useUser.mockReturnValue({
     isLoaded: true,
@@ -107,7 +119,45 @@ function renderSignedInProfile() {
 describe("ProfilePage", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    profileClerk = {
+      user: { id: "user_profile_test" },
+      session: {
+        id: "session_profile_test",
+        getToken: mocks.getToken,
+      },
+      signOut: mocks.clerkSignOut,
+    };
 
+    mocks.useClerk.mockReturnValue(profileClerk);
+
+    mocks.reverify.mockImplementation(
+      (fetcher: (...args: string[]) => Promise<unknown>, ...args: string[]) =>
+        fetcher(...args),
+    );
+
+    mocks.isCancelled.mockReturnValue(false);
+
+    // jsdom cannot perform a real page reload.
+    // Intercept only the navigation call; preserve the real document.
+    const browserWindow = window;
+    const navigation = {
+      href: browserWindow.location.href,
+      origin: browserWindow.location.origin,
+      pathname: browserWindow.location.pathname,
+      search: browserWindow.location.search,
+      hash: browserWindow.location.hash,
+      replace: mocks.replaceLocation,
+    };
+
+    vi.stubGlobal(
+      "window",
+      new Proxy(browserWindow, {
+        get(target, property) {
+          if (property === "location") return navigation;
+          return Reflect.get(target, property, target);
+        },
+      }),
+    );
     vi.stubEnv("NEXT_PUBLIC_SUPPORT_EMAIL", "");
     vi.stubEnv("NEXT_PUBLIC_ACCOUNT_DELETION_ENABLED", "false");
     vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://localhost:5000");
@@ -579,5 +629,233 @@ describe("ProfilePage", () => {
 
     expect(container).toHaveTextContent("StackWing");
     expect(container.textContent).not.toMatch(/Dev Jobs|DVjobs/i);
+  });
+
+  describe("deletion navigation and account safety", () => {
+    beforeEach(() => {
+      vi.stubEnv("NEXT_PUBLIC_ACCOUNT_DELETION_ENABLED", "true");
+
+      mocks.fetch.mockResolvedValue(
+        new Response(JSON.stringify({ status: "pending" }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+
+    async function clickDelete() {
+      const user = userEvent.setup();
+      const deletion = screen.getByRole("region", {
+        name: "Delete account",
+      });
+
+      await user.type(
+        within(deletion).getByLabelText("Type DELETE to confirm"),
+        "DELETE",
+      );
+
+      await user.click(
+        within(deletion).getByRole("button", {
+          name: "Delete account",
+        }),
+      );
+    }
+
+    it.each(["pending", "completed"])(
+      "signs out before requesting a full home reload for %s",
+      async (status) => {
+        mocks.fetch.mockResolvedValue(
+          new Response(JSON.stringify({ status }), {
+            status: status === "completed" ? 200 : 202,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+
+        renderSignedInProfile();
+        await clickDelete();
+
+        await waitFor(() => {
+          expect(mocks.replaceLocation).toHaveBeenCalledExactlyOnceWith(
+            new URL("/", window.location.origin).href,
+          );
+        });
+
+        expect(mocks.clerkSignOut).toHaveBeenCalledExactlyOnceWith({
+          sessionId: "session_profile_test",
+        });
+
+        expect(mocks.clerkSignOut.mock.invocationCallOrder[0]).toBeLessThan(
+          mocks.replaceLocation.mock.invocationCallOrder[0],
+        );
+      },
+    );
+
+    it("waits for sign-out to settle before navigating", async () => {
+      let finishSignOut!: () => void;
+
+      mocks.clerkSignOut.mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishSignOut = resolve;
+        }),
+      );
+
+      renderSignedInProfile();
+      await clickDelete();
+
+      await waitFor(() => {
+        expect(mocks.clerkSignOut).toHaveBeenCalledTimes(1);
+      });
+
+      expect(mocks.replaceLocation).not.toHaveBeenCalled();
+
+      await act(async () => {
+        finishSignOut();
+      });
+
+      expect(mocks.replaceLocation).toHaveBeenCalledExactlyOnceWith(
+        new URL("/", window.location.origin).href,
+      );
+    });
+
+    it("still navigates if the deleted session cannot be signed out again", async () => {
+      mocks.clerkSignOut.mockRejectedValue(
+        new Error("Session already removed"),
+      );
+
+      renderSignedInProfile();
+      await clickDelete();
+
+      await waitFor(() => {
+        expect(mocks.replaceLocation).toHaveBeenCalledTimes(1);
+      });
+
+      expect(mocks.clerkSignOut).toHaveBeenCalledWith({
+        sessionId: "session_profile_test",
+      });
+    });
+
+    it("navigates when sign-out removes the current session", async () => {
+      mocks.clerkSignOut.mockImplementation(async () => {
+        profileClerk.session = null;
+        profileClerk.user = null;
+      });
+
+      renderSignedInProfile();
+      await clickDelete();
+
+      await waitFor(() => {
+        expect(mocks.replaceLocation).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it("does not navigate when the backend rejects deletion", async () => {
+      mocks.fetch.mockResolvedValue(
+        new Response(JSON.stringify({ message: "Deletion is unavailable." }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      renderSignedInProfile();
+      await clickDelete();
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Deletion is unavailable.",
+      );
+
+      expect(mocks.clerkSignOut).not.toHaveBeenCalled();
+      expect(mocks.replaceLocation).not.toHaveBeenCalled();
+    });
+
+    it("leaves the account unchanged when verification is canceled", async () => {
+      const cancellation = new Error("Verification canceled");
+
+      mocks.reverify.mockRejectedValue(cancellation);
+      mocks.isCancelled.mockImplementation(
+        (error: unknown) => error === cancellation,
+      );
+
+      renderSignedInProfile();
+      await clickDelete();
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: "Delete account" }),
+        ).toBeEnabled();
+      });
+
+      expect(mocks.reverify).toHaveBeenCalledTimes(1);
+      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(mocks.clerkSignOut).not.toHaveBeenCalled();
+      expect(mocks.replaceLocation).not.toHaveBeenCalled();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("does not sign out a replacement account while deletion is pending", async () => {
+      let finishRequest!: (response: Response) => void;
+
+      mocks.fetch.mockReturnValue(
+        new Promise<Response>((resolve) => {
+          finishRequest = resolve;
+        }),
+      );
+
+      renderSignedInProfile();
+      await clickDelete();
+
+      await waitFor(() => {
+        expect(mocks.fetch).toHaveBeenCalledTimes(1);
+      });
+
+      profileClerk.user = { id: "user_replacement" };
+      profileClerk.session = {
+        id: "session_replacement",
+        getToken: mocks.getToken,
+      };
+
+      await act(async () => {
+        finishRequest(
+          new Response(JSON.stringify({ status: "pending" }), {
+            status: 202,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      });
+
+      expect(mocks.clerkSignOut).not.toHaveBeenCalled();
+      expect(mocks.replaceLocation).not.toHaveBeenCalled();
+    });
+
+    it("does not navigate away from a replacement session during sign-out", async () => {
+      let finishSignOut!: () => void;
+
+      mocks.clerkSignOut.mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishSignOut = resolve;
+        }),
+      );
+
+      renderSignedInProfile();
+      await clickDelete();
+
+      await waitFor(() => {
+        expect(mocks.clerkSignOut).toHaveBeenCalledTimes(1);
+      });
+
+      profileClerk.user = { id: "user_replacement" };
+      profileClerk.session = {
+        id: "session_replacement",
+        getToken: mocks.getToken,
+      };
+
+      await act(async () => {
+        finishSignOut();
+      });
+
+      expect(mocks.clerkSignOut).toHaveBeenCalledExactlyOnceWith({
+        sessionId: "session_profile_test",
+      });
+      expect(mocks.replaceLocation).not.toHaveBeenCalled();
+    });
   });
 });

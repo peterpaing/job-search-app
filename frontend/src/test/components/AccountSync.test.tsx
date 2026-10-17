@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   signOut: vi.fn(),
   getToken: vi.fn(),
   fetch: vi.fn(),
+  replaceLocation: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs", () => ({
@@ -18,6 +19,11 @@ vi.mock("@clerk/nextjs", () => ({
 
 const errorMessage =
   "We couldn’t connect your account. You can still browse jobs.";
+
+let syncClerk: {
+  session: { id: string } | null;
+  signOut: typeof mocks.signOut;
+};
 
 let timeoutController: AbortController;
 
@@ -51,12 +57,32 @@ function combineSignals(signals: AbortSignal[]) {
 describe("AccountSync", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+
     mocks.signOut.mockResolvedValue(undefined);
 
-    mocks.useClerk.mockReturnValue({
+    syncClerk = {
       session: { id: "session_test" },
       signOut: mocks.signOut,
-    });
+    };
+
+    mocks.useClerk.mockReturnValue(syncClerk);
+
+    const browserWindow = window;
+    const navigation = {
+      href: browserWindow.location.href,
+      origin: browserWindow.location.origin,
+      replace: mocks.replaceLocation,
+    };
+
+    vi.stubGlobal(
+      "window",
+      new Proxy(browserWindow, {
+        get(target, property) {
+          if (property === "location") return navigation;
+          return Reflect.get(target, property, target);
+        },
+      }),
+    );
 
     timeoutController = new AbortController();
 
@@ -380,5 +406,128 @@ describe("AccountSync", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(errorMessage);
 
     expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  });
+  it("handles deletion-related 410 without displaying a retry notice", async () => {
+    mocks.fetch.mockResolvedValue({ ok: false, status: 410 });
+
+    render(<AccountSync />);
+
+    await waitFor(() => {
+      expect(mocks.replaceLocation).toHaveBeenCalledExactlyOnceWith(
+        new URL("/", window.location.origin).href,
+      );
+    });
+
+    expect(mocks.signOut).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "session_test",
+    });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Try again" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("navigates after a 410 even when the old session is already invalid", async () => {
+    mocks.fetch.mockResolvedValue({ ok: false, status: 410 });
+    mocks.signOut.mockRejectedValue(new Error("Session already deleted"));
+
+    render(<AccountSync />);
+
+    await waitFor(() => {
+      expect(mocks.replaceLocation).toHaveBeenCalledTimes(1);
+    });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not sign out a replacement session for an old 410 response", async () => {
+    let finishRequest!: (response: { ok: boolean; status: number }) => void;
+
+    mocks.fetch.mockReturnValue(
+      new Promise((resolve) => {
+        finishRequest = resolve;
+      }),
+    );
+
+    render(<AccountSync />);
+
+    await waitFor(() => {
+      expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    syncClerk.session = { id: "session_replacement" };
+
+    await act(async () => {
+      finishRequest({ ok: false, status: 410 });
+    });
+
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    expect(mocks.replaceLocation).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not navigate if another session becomes active during sign-out", async () => {
+    let finishSignOut!: () => void;
+
+    mocks.fetch.mockResolvedValue({ ok: false, status: 410 });
+    mocks.signOut.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishSignOut = resolve;
+      }),
+    );
+
+    render(<AccountSync />);
+
+    await waitFor(() => {
+      expect(mocks.signOut).toHaveBeenCalledTimes(1);
+    });
+
+    syncClerk.session = { id: "session_replacement" };
+
+    await act(async () => {
+      finishSignOut();
+    });
+
+    expect(mocks.signOut).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "session_test",
+    });
+    expect(mocks.replaceLocation).not.toHaveBeenCalled();
+  });
+
+  it("ignores a deletion response arriving after unmount", async () => {
+    let finishRequest!: (response: { ok: boolean; status: number }) => void;
+
+    mocks.fetch.mockReturnValue(
+      new Promise((resolve) => {
+        finishRequest = resolve;
+      }),
+    );
+
+    const { unmount } = render(<AccountSync />);
+
+    await waitFor(() => {
+      expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    unmount();
+
+    await act(async () => {
+      finishRequest({ ok: false, status: 410 });
+    });
+
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    expect(mocks.replaceLocation).not.toHaveBeenCalled();
+  });
+
+  it("keeps a genuine 503 visible instead of signing the user out", async () => {
+    mocks.fetch.mockResolvedValue({ ok: false, status: 503 });
+
+    render(<AccountSync />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(errorMessage);
+
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    expect(mocks.replaceLocation).not.toHaveBeenCalled();
   });
 });

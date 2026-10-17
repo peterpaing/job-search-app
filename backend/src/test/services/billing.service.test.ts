@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   portalConfiguration: vi.fn(),
   portalCreate: vi.fn(),
   chargesRetrieve: vi.fn(),
+  stopAccountBilling: vi.fn(),
 }));
 
 // Never import the real Neon connection.
@@ -86,7 +87,9 @@ vi.mock("../../services/billing.config.js", async (importOriginal) => {
     }),
   };
 });
-
+vi.mock("../../services/account-deletion.service.js", () => ({
+  stopAccountBillingForCustomer: mocks.stopAccountBilling,
+}));
 import {
   confirmCheckout,
   createCheckout,
@@ -278,7 +281,7 @@ describe("Billing service with a temporary local database", () => {
 
   beforeEach(async () => {
     vi.resetAllMocks();
-
+    mocks.stopAccountBilling.mockResolvedValue(undefined);
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("BILLING_SANDBOX_CLOCK_ENABLED", "false");
     vi.stubEnv("BILLING_MODE", "test");
@@ -1210,5 +1213,120 @@ describe("Billing service with a temporary local database", () => {
     });
 
     expect(mocks.testClocksRetrieve).not.toHaveBeenCalled();
+  });
+  describe("late webhooks after an account deletion request", () => {
+    async function beginDeletion() {
+      const result = await database().query<{
+        result: { status: string };
+      }>(`SELECT account_deletion_begin($1) AS result`, [clerkId]);
+
+      expect(result.rows[0]!.result.status).toBe("pending");
+    }
+
+    async function eventCount(id: string) {
+      const result = await database().query<{ total: number }>(
+        `SELECT count(*)::int AS total
+         FROM billing_events
+         WHERE stripe_event_id = $1`,
+        [id],
+      );
+
+      return result.rows[0]!.total;
+    }
+
+    it.each([
+      "invoice.paid",
+      "customer.subscription.created",
+      "customer.subscription.updated",
+    ])("routes a late %s to cleanup without restoring Pro", async (type) => {
+      subscriptions = [subscription()];
+      expect((await refreshBilling(clerkId)).premium).toBe(true);
+
+      await beginDeletion();
+
+      const readsBefore = mocks.subscriptionsList.mock.calls.length;
+      const id = `evt_late_${type.replaceAll(".", "_")}`;
+
+      await handleBillingEvent(
+        event(id, type, {
+          customer: customerId,
+          status: "active",
+        }),
+      );
+
+      expect(mocks.stopAccountBilling).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          userId,
+          stripeCustomerId: customerId,
+          livemode: false,
+        }),
+      );
+
+      // Ordinary subscription refresh must not run for this event.
+      expect(mocks.subscriptionsList).toHaveBeenCalledTimes(readsBefore);
+
+      const status = await getBillingStatus(clerkId);
+      expect(status.premium).toBe(false);
+
+      const saved = await database().query<{ premium: boolean }>(
+        `SELECT premium
+           FROM billing_subscriptions
+           WHERE stripe_customer_id = $1`,
+        [customerId],
+      );
+
+      expect(saved.rows.every((row) => row.premium === false)).toBe(true);
+      expect(await eventCount(id)).toBe(1);
+    });
+
+    it("acknowledges the event only after cleanup resolves", async () => {
+      await beginDeletion();
+
+      let release!: () => void;
+      mocks.stopAccountBilling.mockReturnValue(
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+      );
+
+      const id = "evt_deletion_waits_for_cleanup";
+      const processing = handleBillingEvent(event(id, "invoice.paid"));
+
+      try {
+        await vi.waitFor(() => {
+          expect(mocks.stopAccountBilling).toHaveBeenCalledTimes(1);
+        });
+
+        expect(await eventCount(id)).toBe(0);
+      } finally {
+        release();
+        await processing;
+      }
+
+      expect(await eventCount(id)).toBe(1);
+    });
+
+    it("leaves a failed event unprocessed and handles the same ID on retry", async () => {
+      await beginDeletion();
+
+      const failure = new Error("Cleanup needs retry");
+      mocks.stopAccountBilling.mockRejectedValueOnce(failure);
+
+      const notification = event("evt_deletion_cleanup_retry", "invoice.paid");
+
+      await expect(handleBillingEvent(notification)).rejects.toBe(failure);
+
+      expect(await eventCount(notification.id)).toBe(0);
+
+      await handleBillingEvent(notification);
+
+      expect(mocks.stopAccountBilling).toHaveBeenCalledTimes(2);
+      expect(await eventCount(notification.id)).toBe(1);
+      expect((await getBillingStatus(clerkId)).premium).toBe(false);
+
+      // A successfully processed delivery is deduplicated.
+      await handleBillingEvent(notification);
+      expect(mocks.stopAccountBilling).toHaveBeenCalledTimes(2);
+    });
   });
 });

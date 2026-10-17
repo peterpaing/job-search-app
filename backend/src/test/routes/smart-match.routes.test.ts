@@ -1,3 +1,9 @@
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import express from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -404,5 +410,280 @@ describe("SmartMatch routes", () => {
       "AI has reached today’s service budget. Try again tomorrow.",
     );
     expect(mocks.hasPremium).not.toHaveBeenCalled();
+  });
+  describe("streamed job answers", () => {
+    function streamRequest() {
+      return request(app)
+        .post("/api/smart-match/ask")
+        .set("Accept", "application/x-ndjson")
+        .buffer(true)
+        .parse((response, done) => {
+          let text = "";
+
+          response.on("data", (chunk: Buffer) => {
+            text += chunk.toString("utf8");
+          });
+          response.on("end", () => done(null, text));
+          response.on("error", (error: Error) => done(error, null));
+        });
+    }
+
+    function frames(body: unknown): Record<string, unknown>[] {
+      return String(body)
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+    }
+
+    it("returns ordered delta and done frames", async () => {
+      const finalAnswer = {
+        answer: "Highlight React experience.",
+        cached: false,
+        usage: { used: 1, limit: 20, remaining: 19 },
+      };
+
+      mocks.answer.mockImplementation(
+        async (
+          _userId: string,
+          _jobId: string,
+          _question: string,
+          onDelta: (delta: string) => void,
+        ) => {
+          onDelta("Highlight ");
+          onDelta("React experience.");
+          return finalAnswer;
+        },
+      );
+
+      const result = await streamRequest().send({
+        jobId: "job-a",
+        question: "Explain my fit.",
+      });
+
+      expect(result.status).toBe(200);
+      expect(result.headers["content-type"]).toContain("application/x-ndjson");
+      expect(result.headers["cache-control"]).toBe("no-store, no-transform");
+      expect(result.headers["x-accel-buffering"]).toBe("no");
+
+      expect(frames(result.body)).toEqual([
+        { type: "delta", delta: "Highlight " },
+        { type: "delta", delta: "React experience." },
+        { type: "done", result: finalAnswer },
+      ]);
+
+      expect(mocks.answer).toHaveBeenCalledExactlyOnceWith(
+        "user_verified",
+        "job-a",
+        "Explain my fit.",
+        expect.any(Function),
+      );
+    });
+
+    it("returns a cached answer as a done frame without fake deltas", async () => {
+      const cached = {
+        answer: "Cached answer.",
+        cached: true,
+        usage: {},
+      };
+      mocks.answer.mockResolvedValue(cached);
+
+      const result = await streamRequest().send({
+        jobId: "job-a",
+        question: "Explain my fit.",
+      });
+
+      expect(frames(result.body)).toEqual([{ type: "done", result: cached }]);
+    });
+
+    it("preserves HTTP errors when failure occurs before streaming begins", async () => {
+      mocks.answer.mockRejectedValue(
+        new SmartMatchError(429, "Daily AI limit reached."),
+      );
+
+      const result = await request(app)
+        .post("/api/smart-match/ask")
+        .set("Accept", "application/x-ndjson")
+        .send({
+          jobId: "job-a",
+          question: "Explain my fit.",
+        });
+
+      expect(result.status).toBe(429);
+      expect(result.body).toEqual({
+        message: "Daily AI limit reached.",
+      });
+    });
+
+    it("sends an error frame instead of done after partial output fails", async () => {
+      mocks.answer.mockImplementation(
+        async (
+          _userId: string,
+          _jobId: string,
+          _question: string,
+          onDelta: (delta: string) => void,
+        ) => {
+          onDelta("Partial answer");
+          throw new SmartMatchError(502, "Answer interrupted.");
+        },
+      );
+
+      const result = await streamRequest().send({
+        jobId: "job-a",
+        question: "Explain my fit.",
+      });
+
+      // Headers were already sent with the first delta.
+      expect(result.status).toBe(200);
+      expect(frames(result.body)).toEqual([
+        { type: "delta", delta: "Partial answer" },
+        {
+          type: "error",
+          status: 502,
+          message: "Answer interrupted.",
+        },
+      ]);
+    });
+
+    it("does not expose unexpected error details after streaming starts", async () => {
+      mocks.answer.mockImplementation(
+        async (
+          _userId: string,
+          _jobId: string,
+          _question: string,
+          onDelta: (delta: string) => void,
+        ) => {
+          onDelta("Partial");
+          throw new Error("private provider credentials");
+        },
+      );
+
+      const result = await streamRequest().send({
+        jobId: "job-a",
+        question: "Explain my fit.",
+      });
+
+      const output = frames(result.body);
+
+      expect(output.at(-1)).toEqual({
+        type: "error",
+        status: 500,
+        message: "AI couldn’t complete this request. Please try again later.",
+      });
+      expect(String(result.body)).not.toContain("credentials");
+      expect(output.some((frame) => frame.type === "done")).toBe(false);
+    });
+
+    it("lets processing finish without writing to a disconnected client", async () => {
+      let release!: () => void;
+      let markClosed!: () => void;
+      let responseRef: ServerResponse | undefined;
+
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const closed = new Promise<void>((resolve) => {
+        markClosed = resolve;
+      });
+
+      mocks.answer.mockImplementation(
+        async (
+          _userId: string,
+          _jobId: string,
+          _question: string,
+          onDelta: (delta: string) => void,
+        ) => {
+          onDelta("First chunk");
+          await gate;
+          onDelta("Later chunk");
+
+          return {
+            answer: "First chunkLater chunk",
+            cached: false,
+            usage: {},
+          };
+        },
+      );
+
+      const server = createServer((req, res) => {
+        responseRef = res;
+        res.once("close", markClosed);
+        app(req, res);
+      });
+
+      await new Promise<void>((resolve) => {
+        server.listen(0, "127.0.0.1", resolve);
+      });
+
+      try {
+        const address = server.address();
+
+        if (!address || typeof address === "string") {
+          throw new Error("Local test server did not start");
+        }
+
+        const incoming = await new Promise<IncomingMessage>(
+          (resolve, reject) => {
+            const client = httpRequest(
+              {
+                hostname: "127.0.0.1",
+                port: address.port,
+                path: "/api/smart-match/ask",
+                method: "POST",
+                headers: {
+                  Accept: "application/x-ndjson",
+                  "Content-Type": "application/json",
+                },
+              },
+              (response) => {
+                response.on("error", () => undefined);
+                response.once("data", () => resolve(response));
+              },
+            );
+
+            client.on("error", reject);
+            client.end(
+              JSON.stringify({
+                jobId: "job-a",
+                question: "Explain my fit.",
+              }),
+            );
+          },
+        );
+
+        if (!responseRef) {
+          throw new Error("Missing server response");
+        }
+
+        const writesAfterFirstChunk = vi.spyOn(responseRef, "write");
+
+        try {
+          incoming.destroy();
+          await closed;
+
+          release();
+
+          await vi.waitFor(() => {
+            expect(mocks.answer.mock.settledResults[0]?.type).toBe("fulfilled");
+          });
+
+          expect(responseRef.destroyed).toBe(true);
+          expect(writesAfterFirstChunk).not.toHaveBeenCalled();
+          expect(mocks.answer).toHaveBeenCalledTimes(1);
+        } finally {
+          writesAfterFirstChunk.mockRestore();
+        }
+      } finally {
+        release();
+        server.closeAllConnections();
+
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => {
+            if (error) reject(error);
+            else resolve();
+          });
+        });
+      }
+    }, 15_000);
   });
 });
