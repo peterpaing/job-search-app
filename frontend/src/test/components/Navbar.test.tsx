@@ -88,7 +88,7 @@ describe("Navbar", () => {
     expect(navigation).toHaveClass("hidden");
   });
 
-  it("closes the menu when nested content inside a link is clicked", async () => {
+  it("closes the menu when SmartMatch is clicked", async () => {
     const user = userEvent.setup();
 
     render(<Navbar />);

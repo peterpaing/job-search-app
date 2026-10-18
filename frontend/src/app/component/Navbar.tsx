@@ -4,7 +4,7 @@ import { useState } from "react";
 import NavLink from "./NavLink";
 import Image from "next/image";
 import { CgProfile } from "react-icons/cg";
-import { FaCrown } from "react-icons/fa";
+
 import { HiOutlineBars3 } from "react-icons/hi2";
 
 import logo from "../assets/logo.png";
@@ -50,13 +50,7 @@ export default function Navbar() {
           <NavLink href="/">Explore</NavLink>
           <NavLink href="/saved-jobs">Saved</NavLink>
           <NavLink href="/tracker">Application</NavLink>
-
-          <NavLink href="/smart-match">
-            <span className="inline-flex items-center gap-2">
-              SmartMatch
-              <FaCrown className="h-4 w-4 shrink-0" aria-hidden="true" />
-            </span>
-          </NavLink>
+          <NavLink href="/smart-match">SmartMatch</NavLink>
 
           <NavLink href="/profile">
             <span className="inline-flex items-center gap-2">
