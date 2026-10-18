@@ -7,6 +7,13 @@ import JobsLayout from "./component/JobsLayout";
 import JobsList from "./component/JobsList";
 import JobsLoading from "./component/JobsLoading";
 import JobsResultsCount from "./component/JobsResultsCount";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  alternates: {
+    canonical: "/",
+  },
+};
 
 type JobsResponse = {
   jobs: Job[];

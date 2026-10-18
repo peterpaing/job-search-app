@@ -17,9 +17,42 @@ const geist = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "StackWing | Developer Jobs & Application Tracker",
+  metadataBase: new URL("https://stackwingjobs.com"),
+
+  applicationName: "StackWing",
+
+  title: {
+    default: "StackWing | Developer Jobs & Application Tracker",
+    template: "%s | StackWing",
+  },
+
   description:
-    "Find developer jobs across multiple job boards, save opportunities, and track your applications with StackWing.",
+    "Discover developer jobs from multiple job boards, save opportunities, track applications, and use SmartMatch to find roles suited to your skills.",
+
+  openGraph: {
+    type: "website",
+    locale: "en_US",
+    siteName: "StackWing",
+    title: "StackWing | Developer Jobs & Application Tracker",
+    description:
+      "Explore developer jobs, save opportunities, track applications, and discover roles suited to your skills with SmartMatch.",
+  },
+
+  twitter: {
+    card: "summary",
+    title: "StackWing | Developer Jobs & Application Tracker",
+    description:
+      "Developer jobs, saved opportunities, application tracking, and SmartMatch—all in one place.",
+  },
+  icons: {
+    icon: [
+      {
+        url: "/icon.webp",
+        type: "image/webp",
+        sizes: "64x64",
+      },
+    ],
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
