@@ -19,6 +19,7 @@ import PremiumPreview from "../component/PremiumPreview";
 import SmartMatchUsage, {
   type SmartMatchUsageData,
 } from "../component/SmartMatchUsage";
+import { readResumeFile } from "../lib/resume-file";
 
 type Profile = {
   skills: string[];
@@ -690,7 +691,36 @@ function SmartMatchWorkspace({
       }
     });
   }
+  function loadResumeFile(file: File) {
+    void run(async () => {
+      const controller = new AbortController();
+      controllers.current.add(controller);
 
+      // A new file requires a fresh consent decision after review.
+      setConsent(false);
+
+      try {
+        const text = await readResumeFile(file, controller.signal);
+
+        if (
+          !mounted.current ||
+          controller.signal.aborted ||
+          clerk.user?.id !== userId ||
+          clerk.session?.id !== sessionId
+        ) {
+          return;
+        }
+
+        setResumeText(text);
+
+        setNotice(
+          `Loaded ${file.name}. Review the text and remove anything you don’t want to send before extraction.`,
+        );
+      } finally {
+        controllers.current.delete(controller);
+      }
+    });
+  }
   function extractResume() {
     void run(async () => {
       const result = await request<ExtractionResponse>("/extract", "POST", {
@@ -918,62 +948,30 @@ function SmartMatchWorkspace({
             </h2>
 
             <p className="text-muted mt-3 text-sm leading-relaxed">
-              Paste resume text or upload a .txt file. Remove contact details
-              and anything you don’t want to send to OpenAI.
+              Paste resume text or upload a .txt or text-based PDF. Review the
+              text below and remove contact details or anything you don’t want
+              to send to OpenAI.
             </p>
 
             <div className="mt-5">
-              <p className="text-primary text-sm font-medium">
-                Resume text file
-              </p>
+              <p className="text-primary text-sm font-medium">Resume file</p>
 
               <input
                 ref={resumeFileInput}
                 id="resume-file"
-                aria-label="Resume text file"
+                aria-label="Resume file"
                 type="file"
-                accept=".txt,text/plain"
+                accept=".txt,.pdf,text/plain,application/pdf"
                 disabled={busy}
                 className="sr-only"
-                onChange={async (event) => {
+                onChange={(event) => {
                   const file = event.target.files?.[0];
+
+                  // Allow selecting the same file again after an error.
                   event.target.value = "";
 
-                  if (!file) {
-                    return;
-                  }
-
-                  if (
-                    !file.name.toLowerCase().endsWith(".txt") ||
-                    file.size > 64_000
-                  ) {
-                    setError("Upload a .txt file smaller than 64 KB.");
-                    return;
-                  }
-
-                  try {
-                    const text = await file.text();
-
-                    if (!mounted.current) {
-                      return;
-                    }
-
-                    if (text.length > 16_000) {
-                      setError("Use no more than 16,000 characters.");
-                      return;
-                    }
-
-                    setResumeText(text);
-                    setError(null);
-                    setNotice(
-                      `Loaded ${file.name}. Review the text before extraction.`,
-                    );
-                  } catch {
-                    if (mounted.current) {
-                      setError(
-                        "Couldn’t read this file. Try pasting the text.",
-                      );
-                    }
+                  if (file) {
+                    loadResumeFile(file);
                   }
                 }}
               />
@@ -985,11 +983,12 @@ function SmartMatchWorkspace({
                 className={`${secondaryButtonClass} mt-3`}
               >
                 <FiUpload aria-hidden="true" />
-                Upload resume (.txt)
+                Upload resume (.txt or .pdf)
               </button>
 
               <p className="text-muted mt-2 text-xs">
-                Text files only · up to 64 KB
+                TXT up to 64 KB · PDF up to 2 MB and 10 pages. Text-based PDFs
+                only; scanned PDFs are not supported.
               </p>
             </div>
 
@@ -1005,7 +1004,10 @@ function SmartMatchWorkspace({
               value={resumeText}
               maxLength={16_000}
               disabled={busy}
-              onChange={(event) => setResumeText(event.target.value)}
+              onChange={(event) => {
+                setResumeText(event.target.value);
+                setConsent(false);
+              }}
               placeholder="Paste your relevant experience and technical skills…"
               className={`${inputClass} application-notes h-48 resize-none overflow-y-auto`}
             />
@@ -1042,9 +1044,13 @@ function SmartMatchWorkspace({
             </button>
 
             <p className="text-muted mt-4 text-xs leading-relaxed">
-              Your raw resume text is not saved in StackWing’s database.
-              Extracted drafts may be cached privately for 24 hours. Review the
-              draft before saving.
+              Files are read locally in your browser and are not uploaded to
+              StackWing. Only the reviewed text is sent for AI extraction after
+              you confirm consent and click Extract with AI. Raw resume text is
+              not saved in StackWing’s database. Extracted drafts can be reused
+              from your private cache for up to 24 hours; expired entries may
+              remain until a new AI generation starts or you delete your
+              SmartMatch data.
             </p>
           </section>
 

@@ -10,10 +10,10 @@ const sources = [
 ];
 
 const navigation = [
-  { name: "Home", href: "/" },
   { name: "Developer jobs", href: "/jobs" },
   { name: "Saved jobs", href: "/saved-jobs" },
   { name: "Application tracker", href: "/tracker" },
+  { name: "SmartMatch", href: "/smart-match" },
 ];
 
 const linkClass =
