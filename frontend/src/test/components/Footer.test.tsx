@@ -39,4 +39,25 @@ describe("Footer navigation", () => {
       screen.getByRole("link", { name: "StackWing home" }),
     ).toHaveAttribute("href", "/");
   });
+  it("links to the legal pages and dedicated support address", () => {
+    render(<Footer />);
+
+    const navigation = within(
+      screen.getByRole("navigation", {
+        name: "Legal and support",
+      }),
+    );
+
+    expect(
+      navigation.getByRole("link", { name: "Privacy Policy" }),
+    ).toHaveAttribute("href", "/privacy");
+
+    expect(
+      navigation.getByRole("link", { name: "Terms of Service" }),
+    ).toHaveAttribute("href", "/terms");
+
+    expect(
+      navigation.getByRole("link", { name: "Contact support" }),
+    ).toHaveAttribute("href", "mailto:stackwingjobs.support@gmail.com");
+  });
 });
