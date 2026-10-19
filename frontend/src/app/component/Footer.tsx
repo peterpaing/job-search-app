@@ -83,6 +83,25 @@ export default function Footer() {
           <p className="max-w-72 sm:max-w-none sm:text-right">
             Job listings belong to their respective sources.
           </p>
+          <nav
+            aria-label="Legal and support"
+            className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm sm:justify-end"
+          >
+            <Link href="/privacy" className={linkClass}>
+              Privacy Policy
+            </Link>
+
+            <Link href="/terms" className={linkClass}>
+              Terms of Service
+            </Link>
+
+            <a
+              href="mailto:stackwingjobs.support@gmail.com"
+              className={linkClass}
+            >
+              Contact support
+            </a>
+          </nav>
         </div>
       </div>
     </footer>
