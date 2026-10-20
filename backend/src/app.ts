@@ -11,10 +11,15 @@ import { createAccountDeletionRouter } from "./routes/account-deletion.routes.js
 import { createHealthRouter } from "./routes/health.routes.js";
 import { createApiRateLimiter } from "./middleware/rate-limit.middleware.js";
 import { isShuttingDown } from "./runtime.js";
+import {
+  globalErrorHandler,
+  requestObservability,
+} from "./middleware/request-observability.middleware.js";
 
 const app = express();
 
 app.disable("x-powered-by");
+app.use(requestObservability);
 
 // Leave unset locally.
 //
@@ -35,7 +40,12 @@ const frontendOrigin = new URL(
 app.use(
   cors({
     origin: frontendOrigin,
-    exposedHeaders: ["Retry-After", "RateLimit", "RateLimit-Policy"],
+    exposedHeaders: [
+      "Retry-After",
+      "RateLimit",
+      "RateLimit-Policy",
+      "X-Request-ID",
+    ],
   }),
 );
 
@@ -78,5 +88,5 @@ app.use("/api/saved-jobs", createSavedJobsRouter(frontendOrigin));
 app.use("/api/applications", createApplicationsRouter(frontendOrigin));
 app.use("/api/smart-match", createSmartMatchRouter(frontendOrigin));
 app.use("/api/billing", createBillingRouter(frontendOrigin));
-
+app.use(globalErrorHandler);
 export default app;

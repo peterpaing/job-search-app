@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { sql } from "drizzle-orm";
 import { isShuttingDown } from "../runtime.js";
+import { reportRequestError } from "../middleware/request-observability.middleware.js";
 
 export function createHealthRouter() {
   const router = Router();
@@ -17,7 +18,7 @@ export function createHealthRouter() {
     res.json({ status: "alive" });
   });
 
-  router.get("/ready", async (_req, res) => {
+  router.get("/ready", async (req, res) => {
     if (isShuttingDown()) {
       res.status(503).json({ status: "not_ready" });
       return;
@@ -59,7 +60,9 @@ export function createHealthRouter() {
       }
 
       res.json({ status: "ready" });
-    } catch {
+    } catch (error) {
+      reportRequestError(req, res, error, "readiness", 503);
+
       res.status(503).json({ status: "not_ready" });
     } finally {
       if (timer) {

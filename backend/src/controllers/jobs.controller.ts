@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { jobsPageQuerySchema } from "../schemas/jobs-page.schema.js";
 import { getStoredJobsPage } from "../services/database-jobs.service.js";
+import { reportRequestError } from "../middleware/request-observability.middleware.js";
 
 export async function jobsRouteController(req: Request, res: Response) {
   const result = jobsPageQuerySchema.safeParse(req.query);
@@ -23,7 +24,7 @@ export async function jobsRouteController(req: Request, res: Response) {
 
     res.json(data);
   } catch (error) {
-    console.error("Failed to read stored jobs:", error);
+    reportRequestError(req, res, error, "jobs");
 
     res.status(500).json({
       message: "Unable to fetch jobs. Please try again later.",

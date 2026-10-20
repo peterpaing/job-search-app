@@ -392,12 +392,17 @@ describe("Billing routes", () => {
 
     expect(mocks.handleBillingEvent).toHaveBeenCalledTimes(5);
 
-    expect(log).toHaveBeenCalledWith(
-      "Stripe webhook processing failed",
+    expect(log).toHaveBeenCalledTimes(1);
+
+    const errorLog = JSON.parse(String(log.mock.calls[0]?.[0]));
+
+    expect(errorLog).toEqual(
       expect.objectContaining({
-        eventId: "evt_route_test",
-        errorKind: "BillingBusyError",
-        billingStatus: 409,
+        event: "http_error",
+        operation: "billing_webhook",
+        status: 503,
+        errorType: "BillingBusyError",
+        requestId: result.headers["x-request-id"],
       }),
     );
   }, 15_000);

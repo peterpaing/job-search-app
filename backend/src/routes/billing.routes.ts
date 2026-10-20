@@ -8,6 +8,10 @@ import {
   verifyStripeEvent,
 } from "../services/billing.config.js";
 import { accountDeletionGuard } from "../middleware/account-deletion.middleware.js";
+import {
+  createErrorReporter,
+  reportRequestError,
+} from "../middleware/request-observability.middleware.js";
 
 // Five processing attempts, with four short waits.
 // Only lock contention is retried inside this request.
@@ -66,21 +70,7 @@ export const stripeWebhook: RequestHandler = async (req, res) => {
     // Acknowledge only after processing succeeds.
     res.json({ received: true });
   } catch (error) {
-    console.error("Stripe webhook processing failed", {
-      eventId: event.id,
-      type: event.type,
-      errorKind:
-        error instanceof BillingBusyError
-          ? "BillingBusyError"
-          : error instanceof BillingError
-            ? "BillingError"
-            : "UnexpectedError",
-      billingStatus: error instanceof BillingError ? error.status : null,
-      message:
-        error instanceof BillingError
-          ? error.message
-          : "Unexpected processing failure; raw details omitted.",
-    });
+    reportRequestError(req, res, error, "billing_webhook", 503);
 
     // Keep unsuccessful processing retryable.
     res.status(503).json({
@@ -218,6 +208,7 @@ export function createBillingRouter(frontendOrigin: string) {
     });
   };
 
+  router.use(createErrorReporter("billing", 503));
   router.use(handleError);
 
   return router;
