@@ -1,9 +1,13 @@
-name: Refresh jobs daily
+name: Refresh jobs
 
 on:
   schedule:
-    # Daily at 00:17 UTC / 06:47 Myanmar time.
+    # Daily import, availability check, and cleanup.
+    # 00:17 UTC / 06:47 Myanmar time.
     - cron: "17 0 * * *"
+
+    # Availability-only checks during the remaining hours.
+    - cron: "17 1-23 * * *"
 
   workflow_dispatch:
 
@@ -16,9 +20,9 @@ concurrency:
 
 jobs:
   refresh:
-    name: Import, verify availability, and clean up jobs
+    name: Refresh stored job availability
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     defaults:
       run:
@@ -42,6 +46,9 @@ jobs:
 
       - name: Import jobs into Neon
         id: import
+        if: >-
+          github.event_name == 'workflow_dispatch' ||
+          github.event.schedule == '17 0 * * *'
         continue-on-error: true
         run: npm run jobs:import
         env:
@@ -53,6 +60,9 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Delete unreferenced jobs closed over 30 days ago
+        if: >-
+          github.event_name == 'workflow_dispatch' ||
+          github.event.schedule == '17 0 * * *'
         run: npm run jobs:cleanup
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -60,5 +70,5 @@ jobs:
       - name: Report import failure
         if: ${{ always() && steps.import.outcome == 'failure' }}
         run: |
-          echo "Import failed. Availability checks still ran against stored jobs."
+          echo "Import failed. Inspect the availability-check step for its outcome."
           exit 1
