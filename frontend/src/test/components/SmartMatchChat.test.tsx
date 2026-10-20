@@ -76,8 +76,8 @@ describe("SmartMatchChat", () => {
     await user.click(screen.getByRole("button", { name: "Send question" }));
 
     expect(
-      screen.getByRole("status", { name: "Generating answer" }),
-    ).toHaveAttribute("aria-busy", "true");
+      screen.getByRole("status", { name: "Answer status" }),
+    ).toHaveTextContent("Generating answer.");
 
     expect(screen.getByText("Thinking…")).toHaveClass("smartmatch-thinking");
 
@@ -331,6 +331,75 @@ describe("SmartMatchChat", () => {
       });
 
       expect(chat.ask).toHaveBeenCalledTimes(1);
+    });
+    it("keeps the announcement unchanged while answer fragments stream", async () => {
+      const chat = startChat();
+      await sendQuestion();
+
+      const status = screen.getByRole("status", {
+        name: "Answer status",
+      });
+
+      expect(status).toHaveTextContent("Generating answer.");
+
+      act(() => {
+        chat.emit("Highlight ");
+      });
+
+      const answerRegion = screen.getByRole("region", {
+        name: "AI answer",
+      });
+
+      expect(answerRegion).toHaveAttribute("aria-live", "off");
+      expect(answerRegion).toHaveAttribute("aria-busy", "true");
+      expect(status).toHaveTextContent("Generating answer.");
+      expect(status).not.toHaveTextContent("Highlight");
+
+      act(() => {
+        chat.emit("your React experience.");
+      });
+
+      expect(status).toHaveTextContent("Generating answer.");
+      expect(answerRegion).toHaveTextContent(
+        "Highlight your React experience.",
+      );
+
+      await act(async () => {
+        chat.finish({
+          answer: "Highlight your React experience.",
+          cached: false,
+        });
+      });
+
+      expect(status).toHaveTextContent(
+        "Answer ready. Read the AI answer section.",
+      );
+      expect(answerRegion).toHaveAttribute("aria-busy", "false");
+    });
+
+    it("does not announce completion when streaming fails", async () => {
+      const chat = startChat();
+      await sendQuestion();
+
+      act(() => {
+        chat.emit("Incomplete advice");
+      });
+
+      await act(async () => {
+        chat.fail(new Error("Answer interrupted."));
+      });
+
+      expect(
+        screen.getByRole("status", { name: "Answer status" }),
+      ).toBeEmptyDOMElement();
+
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Answer interrupted.",
+      );
+
+      expect(
+        screen.queryByRole("region", { name: "AI answer" }),
+      ).not.toBeInTheDocument();
     });
   });
 });
