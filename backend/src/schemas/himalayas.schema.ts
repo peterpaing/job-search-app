@@ -22,4 +22,5 @@ export const himalayasJobSchema = z.object({
 
 export const himalayasResponseSchema = z.object({
   jobs: z.array(himalayasJobSchema),
+  nextCursor: z.string().min(1).nullish(),
 });
