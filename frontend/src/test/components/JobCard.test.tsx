@@ -240,7 +240,7 @@ describe("JobCard", () => {
     render(<JobCard job={job} />);
 
     const link = screen.getByRole("link", {
-      name: "View Frontend Engineer at Example (opens in a new tab)",
+      name: "View job details for Frontend Engineer at Example (opens in a new tab)",
     });
 
     expect(link).toHaveTextContent("View job details");
@@ -323,7 +323,7 @@ describe("JobCard", () => {
 
     fireEvent.click(
       screen.getByRole("link", {
-        name: `View ${job.title} at ${job.company} (opens in a new tab)`,
+        name: `View job details for ${job.title} at ${job.company} (opens in a new tab)`,
       }),
       { button: 0 },
     );
@@ -339,7 +339,7 @@ describe("JobCard", () => {
 
     fireEvent(
       screen.getByRole("link", {
-        name: `View ${job.title} at ${job.company} (opens in a new tab)`,
+        name: `View job details for ${job.title} at ${job.company} (opens in a new tab)`,
       }),
       new MouseEvent("auxclick", {
         bubbles: true,
@@ -359,7 +359,7 @@ describe("JobCard", () => {
 
     fireEvent(
       screen.getByRole("link", {
-        name: `View ${job.title} at ${job.company} (opens in a new tab)`,
+        name: `View job details for ${job.title} at ${job.company} (opens in a new tab)`,
       }),
       new MouseEvent("auxclick", {
         bubbles: true,

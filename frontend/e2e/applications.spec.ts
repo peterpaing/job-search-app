@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+import { signInTestUser } from "./helpers/clerk-auth";
 
 const application = {
   id: "application-browser-test",
@@ -171,23 +173,72 @@ test.describe("signed-out application flow", () => {
 });
 
 test.describe("signed-in tracker controls", () => {
-  test.use({
-    storageState: process.env.PLAYWRIGHT_AUTH_STATE,
-  });
-
-  test.skip(
-    !process.env.PLAYWRIGHT_AUTH_STATE,
-    "Requires a test-account storage state in PLAYWRIGHT_AUTH_STATE",
-  );
-
   test.beforeEach(async ({ page }) => {
     await mockAccountApis(page);
+
+    let currentApplication = { ...application };
+    let removed = false;
 
     await page.route("**/api/applications**", async (route) => {
       const method = route.request().method();
 
       if (method === "DELETE") {
+        removed = true;
         await route.fulfill({ status: 204 });
+        return;
+      }
+
+      if (method === "PATCH") {
+        const changes = route.request().postDataJSON() as {
+          status?: string;
+          notes?: string;
+          expected?: {
+            id: string;
+            updatedAt: string;
+          };
+        };
+
+        if (removed) {
+          await route.fulfill({
+            status: 404,
+            contentType: "application/json",
+            body: JSON.stringify({ message: "Application not found" }),
+          });
+          return;
+        }
+
+        if (
+          changes.expected &&
+          (changes.expected.id !== currentApplication.id ||
+            changes.expected.updatedAt !== currentApplication.updatedAt)
+        ) {
+          await route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: JSON.stringify({
+              message: "Application changed.",
+              application: currentApplication,
+            }),
+          });
+          return;
+        }
+
+        currentApplication = {
+          ...currentApplication,
+          status: changes.status ?? currentApplication.status,
+          notes: changes.notes ?? currentApplication.notes,
+          updatedAt: new Date(
+            Date.parse(currentApplication.updatedAt) + 1,
+          ).toISOString(),
+        };
+
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            application: currentApplication,
+          }),
+        });
         return;
       }
 
@@ -195,16 +246,19 @@ test.describe("signed-in tracker controls", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          applications: [application],
+          applications: removed ? [] : [currentApplication],
         }),
       });
     });
 
+    // Register API mocks before signing in.
+    await signInTestUser(page);
     await page.goto("/tracker");
 
     await expect(
       page.getByRole("heading", {
         name: application.title,
+        exact: true,
       }),
     ).toBeVisible();
   });
@@ -237,26 +291,44 @@ test.describe("signed-in tracker controls", () => {
     ).toBeVisible();
   });
 
-  test("keeps keyboard focus within the confirmation dialog", async ({
+  test("keeps background controls inert while the confirmation dialog is open", async ({
     page,
   }) => {
-    await page
-      .getByRole("button", {
-        name: "Remove Frontend Engineer at Example from tracker",
-      })
-      .click();
+    const deleteButton = page.getByRole("button", {
+      name: "Remove Frontend Engineer at Example from tracker",
+    });
 
-    const dialog = page.getByRole("dialog");
+    await deleteButton.click();
 
-    for (let index = 0; index < 4; index += 1) {
-      await page.keyboard.press("Tab");
+    const dialog = page.getByRole("dialog", {
+      name: "Remove application?",
+    });
+    const cancelButton = dialog.getByRole("button", {
+      name: "Cancel",
+      exact: true,
+    });
+    const removeButton = dialog.getByRole("button", {
+      name: "Remove",
+      exact: true,
+    });
 
-      expect(
-        await dialog.evaluate((element) =>
-          element.contains(document.activeElement),
-        ),
-      ).toBe(true);
-    }
+    await expect(dialog).toBeVisible();
+
+    expect(await dialog.evaluate((element) => element.matches(":modal"))).toBe(
+      true,
+    );
+
+    await expect(cancelButton).toBeFocused();
+
+    await page.keyboard.press("Tab");
+    await expect(removeButton).toBeFocused();
+
+    await page.keyboard.press("Shift+Tab");
+    await expect(cancelButton).toBeFocused();
+
+    // Background controls cannot receive focus while the dialog is modal.
+    await deleteButton.evaluate((element) => element.focus());
+    await expect(cancelButton).toBeFocused();
   });
 
   test("keeps notes fixed-height with internal scrolling", async ({ page }) => {
@@ -287,5 +359,96 @@ test.describe("signed-in tracker controls", () => {
     expect(styles.resize).toBe("none");
     expect(styles.overflowY).toBe("auto");
     expect(styles.scrollHeight).toBeGreaterThan(styles.clientHeight);
+  });
+  test("saves edited notes and status", async ({ page }) => {
+    await page
+      .getByRole("combobox", { name: "Application status" })
+      .selectOption("interviewing");
+
+    await page
+      .getByRole("textbox", { name: "Personal notes" })
+      .fill("Interview on Friday");
+
+    await page.getByRole("button", { name: "Save changes" }).click();
+
+    await expect(
+      page.getByRole("status").filter({ hasText: /^\s*Saved\s*$/ }),
+    ).toBeVisible();
+
+    await expect(
+      page.getByRole("button", { name: "Save changes" }),
+    ).toBeDisabled();
+
+    await expect(
+      page.getByRole("textbox", { name: "Personal notes" }),
+    ).toHaveValue("Interview on Friday");
+  });
+
+  test("preserves the draft when the backend rejects a stale save", async ({
+    page,
+  }) => {
+    await page.route("**/api/applications**", async (route) => {
+      if (route.request().method() !== "PATCH") {
+        await route.fallback();
+        return;
+      }
+
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          message: "Application changed.",
+          application: {
+            ...application,
+            notes: "Newer notes from another tab",
+            updatedAt: "2026-10-11T02:00:00.000Z",
+          },
+        }),
+      });
+    });
+
+    const notes = page.getByRole("textbox", {
+      name: "Personal notes",
+    });
+
+    await notes.fill("My unsaved draft");
+
+    await page.getByRole("button", { name: "Save changes" }).click();
+
+    await expect(
+      page.getByRole("button", { name: "Use latest saved version" }),
+    ).toBeVisible();
+
+    await expect(notes).toHaveValue("My unsaved draft");
+
+    await expect(
+      page.getByRole("button", { name: "Save changes" }),
+    ).toBeDisabled();
+  });
+
+  test("tracker and its delete dialog pass automated accessibility checks", async ({
+    page,
+  }) => {
+    const trackerResults = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+      .analyze();
+
+    expect(trackerResults.violations).toEqual([]);
+
+    await page
+      .getByRole("button", {
+        name: "Remove Frontend Engineer at Example from tracker",
+      })
+      .click();
+
+    await expect(
+      page.getByRole("dialog", { name: "Remove application?" }),
+    ).toBeVisible();
+
+    const dialogResults = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+      .analyze();
+
+    expect(dialogResults.violations).toEqual([]);
   });
 });
