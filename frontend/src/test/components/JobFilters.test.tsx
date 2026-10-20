@@ -489,4 +489,21 @@ describe("JobFilters", () => {
 
     expect(lastNavigation().searchParams.has("source")).toBe(false);
   });
+  it("provides solid keyboard-focus outlines on filter controls", () => {
+    render(<JobFilters />);
+
+    const controls = [
+      companyInput(),
+      dateSelect(),
+      ...screen.getAllByRole("checkbox"),
+    ];
+
+    for (const control of controls) {
+      expect(control).toHaveClass(
+        "focus-visible:outline-2",
+        "focus-visible:outline-offset-2",
+        "focus-visible:outline-primary",
+      );
+    }
+  });
 });

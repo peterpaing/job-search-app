@@ -15,8 +15,7 @@ import {
 } from "react-icons/hi2";
 
 const inputClass =
-  "text-primary caret-primary placeholder:text-muted focus:bg-surface focus:ring-primary/20 selection:bg-primary selection:text-background w-full min-w-0 rounded-xl bg-transparent py-3 pr-10 pl-3 text-sm font-medium transition-colors placeholder:font-normal focus:ring-2 focus:outline-none";
-
+  "text-primary caret-primary placeholder:text-muted focus:bg-surface selection:bg-primary selection:text-background w-full min-w-0 rounded-xl bg-transparent py-3 pr-10 pl-3 text-sm font-medium transition-colors placeholder:font-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 const clearButtonClass =
   "text-muted hover:text-primary focus-visible:outline-primary absolute top-1/2 right-1 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full opacity-100 transition-opacity focus-visible:outline-2 focus-visible:outline-offset-2 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 [@media(hover:none)]:opacity-100";
 

@@ -17,7 +17,7 @@ const sources = [
 ];
 
 const inputClass =
-  "w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-primary focus:outline-none focus:ring-2 focus:ring-primary/20";
+  "w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 
 export type JobFilterValues = {
   sources: string[];
@@ -224,7 +224,7 @@ function JobFiltersForm({ initialQuery, onApply, onClear }: FilterFormProps) {
               value={source}
               checked={filters.sources.includes(source)}
               onChange={() => toggleSource(source)}
-              className="accent-primary h-4 w-4"
+              className="accent-primary focus-visible:outline-primary h-4 w-4 focus-visible:outline-2 focus-visible:outline-offset-2"
             />
             {source}
           </label>

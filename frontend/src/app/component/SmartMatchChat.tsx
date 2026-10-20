@@ -44,6 +44,7 @@ export default function SmartMatchChat({
   const [answer, setAnswer] = useState<ChatAnswer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
 
   const mounted = useRef(false);
   const pending = useRef(false);
@@ -97,6 +98,7 @@ export default function SmartMatchChat({
 
     pending.current = true;
     setLoading(true);
+    setAnnouncement("Generating answer.");
     setError(null);
     setAnswer(null);
     setSubmittedQuestion(value);
@@ -117,11 +119,13 @@ export default function SmartMatchChat({
       if (mounted.current) {
         // The completed, validated result replaces the provisional text.
         setAnswer(result);
+        setAnnouncement("Answer ready. Read the AI answer section.");
       }
     } catch (failure) {
       if (mounted.current) {
         // Do not present an interrupted answer as a successful answer.
         setAnswer(null);
+        setAnnouncement("");
 
         setError(
           failure instanceof Error
@@ -170,6 +174,15 @@ export default function SmartMatchChat({
         >
           <FiX aria-hidden="true" className="h-5 w-5" />
         </button>
+        <p
+          role="status"
+          aria-label="Answer status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="sr-only"
+        >
+          {announcement}
+        </p>
       </header>
 
       <div
@@ -214,13 +227,7 @@ export default function SmartMatchChat({
         )}
 
         {loading && !answer && (
-          <div
-            role="status"
-            aria-label="Generating answer"
-            aria-live="polite"
-            aria-busy="true"
-            className="flex items-center gap-3 px-1 py-3"
-          >
+          <div aria-hidden="true" className="flex items-center gap-3 px-1 py-3">
             <span
               aria-hidden="true"
               className="bg-primary h-2 w-2 shrink-0 rounded-full motion-safe:animate-pulse"
@@ -234,8 +241,10 @@ export default function SmartMatchChat({
 
         {answer && (
           <div
-            role="status"
-            aria-live="polite"
+            role="region"
+            aria-label="AI answer"
+            aria-live="off"
+            aria-busy={loading}
             className="bg-surface mr-5 rounded-2xl rounded-tl-sm p-4"
           >
             <div className="text-muted mb-3 flex items-center gap-2 text-xs font-medium">

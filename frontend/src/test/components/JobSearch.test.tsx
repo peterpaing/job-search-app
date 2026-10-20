@@ -413,4 +413,17 @@ describe("JobSearch", () => {
     expect(lastNavigation().searchParams.has("location")).toBe(false);
     expect(lastNavigation().searchParams.get("q")).toBe("React");
   });
+  it("provides solid keyboard-focus outlines on both search fields", () => {
+    render(<JobSearch />);
+
+    for (const input of [keywordInput(), locationInput()]) {
+      expect(input).toHaveClass(
+        "focus-visible:outline-2",
+        "focus-visible:outline-offset-2",
+        "focus-visible:outline-primary",
+      );
+
+      expect(input).not.toHaveClass("focus:outline-none");
+    }
+  });
 });
