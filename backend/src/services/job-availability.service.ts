@@ -6,6 +6,7 @@ import {
   type AvailabilityResult,
 } from "./job-availability.logic.js";
 import { readJobPage } from "./safe-job-page.service.js";
+import { availabilityCandidatesQuery } from "./job-availability-candidates.js";
 
 type Candidate = {
   id: string;
@@ -18,7 +19,6 @@ type RecordedResult = {
   result: string;
 };
 
-const BATCH_SIZE = 200;
 const CONCURRENCY = 3;
 
 export async function checkJobAvailability() {
@@ -38,25 +38,8 @@ export async function checkJobAvailability() {
     RETURNING j.id
   `);
 
-  // Includes retained inactive jobs so verified reopened listings
-  // can become active again.
-  const candidates = await db.execute<Candidate>(sql`
-    SELECT
-      j.id,
-      j.url,
-      j.title,
-      j.company
-    FROM public.jobs AS j
-    LEFT JOIN public.job_availability AS a
-      ON a.job_id = j.id
-    WHERE
-      a.last_checked_at IS NULL
-      OR a.last_checked_at <= now() - interval '24 hours'
-    ORDER BY
-      a.last_checked_at ASC NULLS FIRST,
-      j.id ASC
-    LIMIT ${BATCH_SIZE}
-  `);
+  // Active and inactive jobs have independent check allowances.
+  const candidates = await db.execute<Candidate>(availabilityCandidatesQuery);
 
   const summary = {
     expired: expired.rows.length,
