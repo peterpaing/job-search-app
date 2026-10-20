@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useTransition } from "react";
+import { useEffect, useRef, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   HiChevronLeft,
@@ -8,6 +8,10 @@ import {
   HiOutlineMagnifyingGlass,
 } from "react-icons/hi2";
 import JobCard, { type Job } from "./JobCard";
+import {
+  requestPaginationFocus,
+  restorePaginationFocus,
+} from "../lib/pagination-focus";
 
 const MAX_PAGE_BUTTONS = 4;
 
@@ -23,6 +27,18 @@ export default function JobsList({ jobs, page, totalPages }: JobsListProps) {
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
   const jobsStartRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const requestedPage = Number(searchParams.get("page") ?? "1");
+
+    // Wait until the server-provided results match the requested page.
+    if (page !== requestedPage) {
+      return;
+    }
+
+    if (jobsStartRef.current) {
+      restorePaginationFocus(jobsStartRef.current);
+    }
+  }, [page, searchParams]);
 
   const pageButtonCount = Math.min(totalPages, MAX_PAGE_BUTTONS);
   const firstVisiblePage = Math.max(
@@ -54,7 +70,10 @@ export default function JobsList({ jobs, page, totalPages }: JobsListProps) {
     }
 
     const query = params.toString();
+
     const destination = query ? `${pathname}?${query}` : pathname;
+
+    requestPaginationFocus(destination);
 
     startTransition(() => {
       router.push(destination, { scroll: false });
@@ -73,6 +92,9 @@ export default function JobsList({ jobs, page, totalPages }: JobsListProps) {
       <div
         role="status"
         className="border-border bg-background flex min-h-[300px] flex-col items-center justify-center rounded-2xl border px-6 py-12 text-center sm:px-10"
+        ref={jobsStartRef}
+        tabIndex={-1}
+        aria-label="Job results, no jobs found"
       >
         <div className="bg-surface text-muted flex h-16 w-16 items-center justify-center rounded-full">
           <HiOutlineMagnifyingGlass className="h-8 w-8" aria-hidden="true" />
@@ -91,7 +113,14 @@ export default function JobsList({ jobs, page, totalPages }: JobsListProps) {
   }
 
   return (
-    <div ref={jobsStartRef} aria-busy={isPending} className="scroll-mt-24">
+    <div
+      ref={jobsStartRef}
+      role="region"
+      aria-label={`Job results, page ${page} of ${totalPages}`}
+      tabIndex={-1}
+      aria-busy={isPending}
+      className="focus:outline-primary scroll-mt-24 rounded-lg focus:outline-2 focus:outline-offset-4"
+    >
       <div className="grid content-start gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {jobs.map((job) => (
           <JobCard key={job.id} job={job} />
