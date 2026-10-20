@@ -327,10 +327,22 @@ describe("GET /api/jobs", () => {
     expect(response.body).toEqual({
       message: "Unable to fetch jobs. Please try again later.",
     });
-    expect(console.error).toHaveBeenCalledWith(
-      "Failed to read stored jobs:",
-      error,
+    const errorLog = vi
+      .mocked(console.error)
+      .mock.calls.map(([line]) => JSON.parse(String(line)))
+      .find((entry) => entry.event === "http_error");
+
+    expect(errorLog).toEqual(
+      expect.objectContaining({
+        event: "http_error",
+        operation: "jobs",
+        status: 500,
+        errorType: "Error",
+        requestId: response.headers["x-request-id"],
+      }),
     );
+
+    expect(JSON.stringify(errorLog)).not.toContain("Database unavailable");
   });
 
   it("does not expose database error details", async () => {

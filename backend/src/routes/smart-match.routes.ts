@@ -9,6 +9,10 @@ import {
 import { BillingError } from "../services/billing.config.js";
 import { accountDeletionGuard } from "../middleware/account-deletion.middleware.js";
 import { createAiRequestLimiter } from "../middleware/rate-limit.middleware.js";
+import {
+  createErrorReporter,
+  reportRequestError,
+} from "../middleware/request-observability.middleware.js";
 
 const extractSchema = z
   .object({
@@ -275,7 +279,15 @@ export function createSmartMatchRouter(frontendOrigin: string) {
         next(error);
         return;
       }
-
+      reportRequestError(
+        req,
+        res,
+        error,
+        "smart_match_stream",
+        error instanceof SmartMatchError || error instanceof BillingError
+          ? error.status
+          : 500,
+      );
       writeEvent({
         type: "error",
         status:
@@ -310,6 +322,7 @@ export function createSmartMatchRouter(frontendOrigin: string) {
     });
   };
 
+  router.use(createErrorReporter("smart_match"));
   router.use(handleError);
 
   return router;

@@ -1,5 +1,6 @@
 import { getAuth } from "@clerk/express";
 import type { RequestHandler } from "express";
+import { reportRequestError } from "./request-observability.middleware.js";
 
 export const accountDeletionGuard: RequestHandler = async (req, res, next) => {
   try {
@@ -28,7 +29,9 @@ export const accountDeletionGuard: RequestHandler = async (req, res, next) => {
     }
 
     next();
-  } catch {
+  } catch (error) {
+    reportRequestError(req, res, error, "account_verification", 503);
+
     // Fail closed when deletion state cannot be checked.
     res.status(503).json({
       message: "Account verification is temporarily unavailable.",

@@ -2,6 +2,7 @@ import { clerkMiddleware, getAuth } from "@clerk/express";
 import { Router, type ErrorRequestHandler } from "express";
 import { z } from "zod";
 import { accountDeletionGuard } from "../middleware/account-deletion.middleware.js";
+import { createErrorReporter } from "../middleware/request-observability.middleware.js";
 
 const jobIdSchema = z.string().trim().min(1).max(512);
 
@@ -112,6 +113,7 @@ export function createSavedJobsRouter(frontendOrigin: string) {
     });
   };
 
+  router.use(createErrorReporter("saved_jobs"));
   router.use(handleError);
 
   return router;

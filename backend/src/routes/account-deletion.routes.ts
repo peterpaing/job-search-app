@@ -2,6 +2,7 @@ import { clerkMiddleware, getAuth } from "@clerk/express";
 import { reverificationError } from "@clerk/backend/internal";
 import { Router } from "express";
 import { z } from "zod";
+import { reportRequestError } from "../middleware/request-observability.middleware.js";
 
 export function createAccountDeletionRouter(frontendOrigin: string) {
   const router = Router();
@@ -67,6 +68,13 @@ export function createAccountDeletionRouter(frontendOrigin: string) {
     } catch (error) {
       const { AccountDeletionError } =
         await import("../services/account-deletion.state.js");
+      reportRequestError(
+        req,
+        res,
+        error,
+        "account_deletion",
+        error instanceof AccountDeletionError ? error.status : 503,
+      );
 
       res
         .status(error instanceof AccountDeletionError ? error.status : 503)

@@ -1,6 +1,7 @@
 import { Router, type ErrorRequestHandler } from "express";
 import { clerkMiddleware, getAuth } from "@clerk/express";
 import { accountDeletionGuard } from "../middleware/account-deletion.middleware.js";
+import { createErrorReporter } from "../middleware/request-observability.middleware.js";
 
 export function createUsersRouter(frontendOrigin: string) {
   const router = Router();
@@ -55,6 +56,7 @@ export function createUsersRouter(frontendOrigin: string) {
     });
   };
 
+  router.use(createErrorReporter("users"));
   router.use(handleError);
 
   return router;
