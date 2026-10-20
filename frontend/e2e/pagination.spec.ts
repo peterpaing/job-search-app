@@ -259,3 +259,65 @@ test("the mock API returns only the requested page", async ({ request }) => {
   expect(data.jobs).toHaveLength(6);
   expect(data.jobs[0].title).toBe("React Developer 19");
 });
+
+test("the first keyboard link skips navigation and focuses main content", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const skipLink = page.getByRole("link", {
+    name: "Skip to content",
+    exact: true,
+  });
+
+  await page.keyboard.press("Tab");
+
+  await expect(skipLink).toBeFocused();
+  await expect(skipLink).toBeInViewport();
+
+  await page.keyboard.press("Enter");
+
+  await expect(page.locator("#main-content")).toBeFocused();
+});
+
+test("keyboard pagination focuses the newly loaded results", async ({
+  page,
+}) => {
+  await page.goto("/?q=react&location=Singapore");
+
+  const pageTwo = page.getByRole("button", {
+    name: "Page 2",
+    exact: true,
+  });
+
+  await pageTwo.focus();
+  await pageTwo.press("Enter");
+
+  await expect(
+    page.getByRole("heading", {
+      name: "React Developer 19",
+      exact: true,
+    }),
+  ).toBeVisible();
+
+  await expect(
+    page.getByRole("region", {
+      name: "Job results, page 2 of 2",
+      exact: true,
+    }),
+  ).toBeFocused();
+});
+
+test("opening a shared results page does not automatically focus the results", async ({
+  page,
+}) => {
+  await page.goto("/?q=react&location=Singapore&page=2");
+
+  const results = page.getByRole("region", {
+    name: "Job results, page 2 of 2",
+    exact: true,
+  });
+
+  await expect(results).toBeVisible();
+  await expect(results).not.toBeFocused();
+});

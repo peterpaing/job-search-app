@@ -59,6 +59,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geist.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col font-sans">
+        <a
+          href="#main-content"
+          className="bg-primary text-background fixed top-3 left-3 z-[100] -translate-y-24 rounded-lg px-4 py-3 text-sm font-semibold focus:translate-y-0 focus:outline-2 focus:outline-offset-2 focus:outline-black"
+        >
+          Skip to content
+        </a>
         <ClerkProvider
           afterSignOutUrl="/"
           localization={{
@@ -107,8 +113,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
 
               <AccountSync />
               <SavedJobsNotice />
-
-              <main className="flex-1">{children}</main>
+              <main id="main-content" tabIndex={-1} className="flex-1">
+                {children}
+              </main>
 
               <Footer />
             </ApplicationsProvider>
