@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../db/index.js";
 import { jobs, users } from "../../db/schema.js";
@@ -58,6 +58,16 @@ describe("saved jobs database integration", () => {
 
       if (testJobIds.size > 0) {
         await db.delete(jobs).where(inArray(jobs.id, [...testJobIds]));
+
+        await db.execute(sql`
+          DELETE FROM public.job_availability
+          WHERE job_id IN (
+            ${sql.join(
+              [...testJobIds].map((id) => sql`${id}`),
+              sql`, `,
+            )}
+          )
+        `);
       }
     } finally {
       testClerkIds.clear();
@@ -155,21 +165,24 @@ describe("saved jobs database integration", () => {
     expect(await getSavedJobs(clerkId)).toHaveLength(1);
   });
 
-  it("retains old saved jobs while cleaning old unsaved jobs", async () => {
+  it("retains saved jobs while cleaning long-closed unsaved jobs", async () => {
     const clerkId = createClerkId();
     const savedJobId = await createJob();
     const unsavedJobId = await createJob();
 
-    const oldDate = new Date(
-      Date.now() - 40 * 24 * 60 * 60 * 1000,
-    ).toISOString();
+    await saveJob(clerkId, savedJobId);
 
     await db
       .update(jobs)
-      .set({ createdAt: oldDate })
+      .set({ isActive: false })
       .where(inArray(jobs.id, [savedJobId, unsavedJobId]));
 
-    await saveJob(clerkId, savedJobId);
+    await db.execute(sql`
+      UPDATE public.job_availability
+      SET closed_at = now() - interval '40 days'
+      WHERE job_id IN (${savedJobId}, ${unsavedJobId})
+    `);
+
     await cleanupJobs();
 
     const remainingSavedJob = await db
@@ -182,7 +195,7 @@ describe("saved jobs database integration", () => {
       .from(jobs)
       .where(eq(jobs.id, unsavedJobId));
 
-    expect(remainingSavedJob).toHaveLength(1);
+    expect(remainingSavedJob).toEqual([{ id: savedJobId }]);
     expect(removedUnsavedJob).toEqual([]);
     expect(await getSavedJobs(clerkId)).toHaveLength(1);
   });

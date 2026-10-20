@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../db/index.js";
 import { jobs, users } from "../../db/schema.js";
@@ -59,6 +59,16 @@ describe("applications database integration", () => {
 
       if (fixtureJobs.size > 0) {
         await db.delete(jobs).where(inArray(jobs.id, [...fixtureJobs]));
+
+        await db.execute(sql`
+          DELETE FROM public.job_availability
+          WHERE job_id IN (
+            ${sql.join(
+              [...fixtureJobs].map((id) => sql`${id}`),
+              sql`, `,
+            )}
+          )
+        `);
       }
     } finally {
       fixtureUsers.clear();
@@ -188,20 +198,19 @@ describe("applications database integration", () => {
     expect(await getSavedJobs(owner)).toHaveLength(1);
   });
 
-  it("retains application history when cleanup deletes the original job", async () => {
+  it("preserves tracked jobs and application history during cleanup", async () => {
     const owner = clerkId();
     const jobId = await createJob();
 
     await trackApplication(owner, jobId);
 
-    await db
-      .update(jobs)
-      .set({
-        createdAt: new Date(
-          Date.now() - 40 * 24 * 60 * 60 * 1000,
-        ).toISOString(),
-      })
-      .where(eq(jobs.id, jobId));
+    await db.update(jobs).set({ isActive: false }).where(eq(jobs.id, jobId));
+
+    await db.execute(sql`
+      UPDATE public.job_availability
+      SET closed_at = now() - interval '40 days'
+      WHERE job_id = ${jobId}
+    `);
 
     await cleanupJobs();
 
@@ -210,7 +219,7 @@ describe("applications database integration", () => {
       .from(jobs)
       .where(eq(jobs.id, jobId));
 
-    expect(originalJob).toEqual([]);
+    expect(originalJob).toEqual([{ id: jobId }]);
 
     const [remaining] = await getApplications(owner);
 
@@ -221,7 +230,6 @@ describe("applications database integration", () => {
       url: "https://example.com/jobs/test",
     });
 
-    // Existing history can still be updated after job cleanup.
     expect(
       await updateApplication(owner, jobId, {
         status: "offered",
