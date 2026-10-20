@@ -225,7 +225,7 @@ describe("applications service", () => {
     expect(mocks.set).toHaveBeenCalledWith({
       status: "interviewing",
       notes: "Friday interview",
-      updatedAt: expect.any(String),
+      updatedAt: expect.any(Object),
     });
 
     expectOwnedCondition(mocks.updateWhere.mock.calls[0][0] as SQL);
@@ -268,5 +268,54 @@ describe("applications service", () => {
     expect(
       builders.some((builder) => builder.from.mock.calls[0]?.[0] === jobs),
     ).toBe(true);
+  });
+  it("includes the expected record and version in the atomic update", async () => {
+    await updateApplication("user_verified", "job-a", {
+      notes: "New draft",
+      expected: {
+        id: record.id,
+        updatedAt: record.updatedAt,
+      },
+    });
+
+    const condition = mocks.updateWhere.mock.calls[0][0] as SQL;
+    const query = new PgDialect().sqlToQuery(condition);
+
+    expect(query.sql).toContain("date_trunc");
+    expect(query.params).toEqual([
+      "job-a",
+      "user_verified",
+      record.id,
+      record.updatedAt,
+    ]);
+
+    expect(mocks.set.mock.calls[0][0]).not.toHaveProperty("expected");
+  });
+
+  it("returns the latest owned record after a version conflict", async () => {
+    const latest = {
+      ...record,
+      notes: "Saved elsewhere",
+      updatedAt: "2026-10-11T02:00:00.000Z",
+    };
+
+    mocks.updateReturning.mockResolvedValue([]);
+    mocks.rows.push([latest]);
+
+    await expect(
+      updateApplication("user_verified", "job-a", {
+        notes: "Stale draft",
+        expected: {
+          id: record.id,
+          updatedAt: record.updatedAt,
+        },
+      }),
+    ).resolves.toMatchObject({
+      conflict: true,
+      current: {
+        id: record.id,
+        notes: "Saved elsewhere",
+      },
+    });
   });
 });

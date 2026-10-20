@@ -240,4 +240,41 @@ describe("applications routes", () => {
       treatPendingAsSignedOut: true,
     });
   });
+  it("returns 409 with the latest record after a stale save", async () => {
+    const latest = {
+      ...application,
+      notes: "Saved elsewhere",
+      updatedAt: "2026-10-11T02:00:00.000Z",
+    };
+
+    mocks.updateApplication.mockResolvedValue({
+      conflict: true,
+      current: latest,
+    });
+
+    const result = await request(app)
+      .patch("/api/applications/job-a")
+      .send({
+        notes: "My stale draft",
+        expected: {
+          id: application.id,
+          updatedAt: application.updatedAt,
+        },
+      });
+
+    expect(result.status).toBe(409);
+    expect(result.body.application).toEqual(latest);
+
+    expect(mocks.updateApplication).toHaveBeenCalledWith(
+      "user_verified",
+      "job-a",
+      {
+        notes: "My stale draft",
+        expected: {
+          id: application.id,
+          updatedAt: application.updatedAt,
+        },
+      },
+    );
+  });
 });

@@ -40,6 +40,10 @@ type PendingVisit = {
 type ApplicationUpdate = {
   status?: ApplicationStatus;
   notes?: string;
+  expected?: {
+    id: string;
+    updatedAt: string;
+  };
 };
 
 type ApplicationsContextValue = {
@@ -307,7 +311,10 @@ function ApplicationSession({
           signal: AbortSignal.timeout(15_000),
         },
       );
-
+      // Let update() handle a version conflict and its latest record.
+      if (response.status === 409 && method === "PATCH") {
+        return response;
+      }
       if (!response.ok) {
         if (response.status === 404 && method === "PUT") {
           throw new Error("This listing is no longer available to track.");
@@ -538,6 +545,14 @@ function ApplicationSession({
         }
 
         mergeRecord(data.application);
+
+        if (response.status === 409) {
+          setError(
+            "This application changed before your save completed. Your draft is preserved. Review the latest version before saving again.",
+          );
+          return false;
+        }
+
         return true;
       } catch {
         if (mounted.current) {

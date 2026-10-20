@@ -893,4 +893,30 @@ describe("ApplicationsProvider", () => {
 
     expect(putCalls()).toHaveLength(1);
   });
+  it("loads the latest record and reports a rejected stale save", async () => {
+    const latest = {
+      ...application,
+      status: "offered" as const,
+      notes: "Saved by another tab",
+      updatedAt: "2026-10-11T02:00:00.000Z",
+    };
+
+    mocks.fetch.mockResolvedValue(response({ applications: [application] }));
+
+    render(tree());
+    await ready();
+
+    mocks.fetch.mockResolvedValue(response({ application: latest }, 409));
+
+    fireEvent.click(screen.getByRole("button", { name: "Update application" }));
+
+    await waitFor(() => {
+      expect(records()).toEqual([latest]);
+      expect(screen.getByTestId("error")).toHaveTextContent(
+        "Your draft is preserved",
+      );
+    });
+
+    expect(screen.getByTestId("busy")).toHaveTextContent("false");
+  });
 });

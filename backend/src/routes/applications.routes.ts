@@ -11,6 +11,13 @@ const updateSchema = z
       .enum(["applied", "interviewing", "offered", "rejected"])
       .optional(),
     notes: z.string().max(5000).optional(),
+    expected: z
+      .object({
+        id: z.string().min(1).max(128),
+        updatedAt: z.iso.datetime(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .refine((value) => value.status !== undefined || value.notes !== undefined, {
@@ -118,6 +125,14 @@ export function createApplicationsRouter(frontendOrigin: string) {
 
       if (!application) {
         res.status(404).json({ message: "Application not found" });
+        return;
+      }
+      if ("conflict" in application) {
+        res.status(409).json({
+          message:
+            "Application changed. Review the latest version before saving.",
+          application: application.current,
+        });
         return;
       }
 

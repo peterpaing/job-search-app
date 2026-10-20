@@ -256,4 +256,39 @@ describe("applications database integration", () => {
 
     expect(await getApplications(owner)).toEqual([]);
   });
+  it("rejects a stale save without overwriting the winning update", async () => {
+    const owner = clerkId();
+    const jobId = await createJob();
+    const original = await trackApplication(owner, jobId);
+
+    if (!original) {
+      throw new Error("Expected a tracked application");
+    }
+
+    const expected = {
+      id: original.id,
+      updatedAt: original.updatedAt,
+    };
+
+    const winner = await updateApplication(owner, jobId, {
+      notes: "Winning update",
+      expected,
+    });
+
+    expect(winner).not.toHaveProperty("conflict");
+
+    const stale = await updateApplication(owner, jobId, {
+      notes: "Stale update",
+      expected,
+    });
+
+    expect(stale).toMatchObject({
+      conflict: true,
+      current: { notes: "Winning update" },
+    });
+
+    const records = await getApplications(owner);
+
+    expect(records[0]?.notes).toBe("Winning update");
+  });
 });
