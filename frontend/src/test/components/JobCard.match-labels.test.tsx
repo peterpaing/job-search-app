@@ -143,7 +143,7 @@ describe("JobCard match labels", () => {
     );
 
     const button = screen.getByRole("button", {
-      name: "Ask about Frontend Engineer at Example",
+      name: "Ask about this job: Frontend Engineer at Example",
     });
 
     fireEvent.click(button);

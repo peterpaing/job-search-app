@@ -152,7 +152,7 @@ export default function JobCard({
           href={job.url}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label={`View ${job.title} at ${job.company} (opens in a new tab)`}
+          aria-label={`View job details for ${job.title} at ${job.company} (opens in a new tab)`}
           onClick={(event) => {
             if (!event.defaultPrevented && event.button === 0) {
               recordVisit?.(job);
@@ -237,7 +237,7 @@ export default function JobCard({
           <button
             type="button"
             disabled={askDisabled}
-            aria-label={`Ask about ${job.title} at ${job.company}`}
+            aria-label={`Ask about this job: ${job.title} at ${job.company}`}
             onClick={(event) => onAsk(event.currentTarget)}
             className="bg-primary text-background focus-visible:outline-primary inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-medium transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
           >
