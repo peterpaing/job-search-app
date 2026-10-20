@@ -184,14 +184,17 @@ describe("himalayasResponseSchema", () => {
     });
   });
 
-  it("ignores extra response metadata", () => {
+  it("preserves the pagination cursor while ignoring unused metadata", () => {
     expect(
       himalayasResponseSchema.parse({
         jobs: [validJob],
         totalCount: 100,
         nextCursor: "example-cursor",
       }),
-    ).toEqual({ jobs: [validJob] });
+    ).toEqual({
+      jobs: [validJob],
+      nextCursor: "example-cursor",
+    });
   });
 
   it("rejects a response without jobs", () => {
