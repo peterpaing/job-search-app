@@ -284,6 +284,10 @@ describe("TrackerPage", () => {
     expect(mocks.update).toHaveBeenCalledWith("job-a", {
       status: "interviewing",
       notes: "Interview on Friday",
+      expected: {
+        id: application.id,
+        updatedAt: application.updatedAt,
+      },
     });
   });
 
@@ -521,5 +525,164 @@ describe("TrackerPage", () => {
     ]) {
       expect(section).not.toHaveClass(className);
     }
+  });
+  it("updates untouched form fields when refreshed records arrive", () => {
+    const { rerender } = render(<TrackerPage />);
+
+    mocks.useApplications.mockReturnValue({
+      ...context(),
+      applications: [
+        {
+          ...application,
+          status: "offered",
+          notes: "New server notes",
+          updatedAt: "2026-10-11T02:00:00.000Z",
+        },
+      ],
+    });
+
+    rerender(<TrackerPage />);
+
+    expect(
+      screen.getByRole("combobox", { name: "Application status" }),
+    ).toHaveValue("offered");
+
+    expect(screen.getByRole("textbox", { name: "Personal notes" })).toHaveValue(
+      "New server notes",
+    );
+
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  });
+
+  it("preserves a draft and blocks saving after a conflicting refresh", () => {
+    const { rerender } = render(<TrackerPage />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Personal notes" }), {
+      target: { value: "My unsaved draft" },
+    });
+
+    mocks.useApplications.mockReturnValue({
+      ...context(),
+      applications: [
+        {
+          ...application,
+          status: "interviewing",
+          notes: "Saved in another tab",
+          updatedAt: "2026-10-11T02:00:00.000Z",
+        },
+      ],
+    });
+
+    rerender(<TrackerPage />);
+
+    expect(screen.getByRole("textbox", { name: "Personal notes" })).toHaveValue(
+      "My unsaved draft",
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This application changed",
+    );
+
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(mocks.update).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use latest saved version" }),
+    );
+
+    expect(screen.getByRole("textbox", { name: "Personal notes" })).toHaveValue(
+      "Saved in another tab",
+    );
+
+    expect(
+      screen.getByRole("combobox", { name: "Application status" }),
+    ).toHaveValue("interviewing");
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("requires explicit acknowledgement before saving a conflicting draft", async () => {
+    const { rerender } = render(<TrackerPage />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Personal notes" }), {
+      target: { value: "My draft" },
+    });
+
+    const latest = {
+      ...application,
+      notes: "Saved elsewhere",
+      updatedAt: "2026-10-11T02:00:00.000Z",
+    };
+
+    mocks.useApplications.mockReturnValue({
+      ...context(),
+      applications: [latest],
+    });
+
+    rerender(<TrackerPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep my draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(mocks.update).toHaveBeenCalledWith("job-a", {
+        status: "applied",
+        notes: "My draft",
+        expected: {
+          id: latest.id,
+          updatedAt: latest.updatedAt,
+        },
+      });
+    });
+  });
+  it("does not resurrect an acknowledged draft after a later refresh", () => {
+    const { rerender } = render(<TrackerPage />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Personal notes" }), {
+      target: { value: "My saved notes" },
+    });
+
+    // Simulate the server acknowledging the draft after a successful save.
+    mocks.useApplications.mockReturnValue({
+      ...context(),
+      applications: [
+        {
+          ...application,
+          notes: "My saved notes",
+          updatedAt: "2026-10-11T02:00:00.000Z",
+        },
+      ],
+    });
+
+    rerender(<TrackerPage />);
+
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+
+    // A later refresh must replace the now-pristine form.
+    mocks.useApplications.mockReturnValue({
+      ...context(),
+      applications: [
+        {
+          ...application,
+          status: "offered",
+          notes: "A newer saved version",
+          updatedAt: "2026-10-11T03:00:00.000Z",
+        },
+      ],
+    });
+
+    rerender(<TrackerPage />);
+
+    expect(screen.getByRole("textbox", { name: "Personal notes" })).toHaveValue(
+      "A newer saved version",
+    );
+
+    expect(
+      screen.getByRole("combobox", { name: "Application status" }),
+    ).toHaveValue("offered");
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
   });
 });

@@ -18,6 +18,7 @@ import {
   type Application,
   type ApplicationStatus,
 } from "../component/ApplicationsProvider";
+import { useApplicationDraft } from "../lib/use-application-draft";
 
 const statusStyles = {
   applied: {
@@ -69,8 +70,16 @@ const statuses: ApplicationStatus[] = [
 function ApplicationCard({ application }: { application: Application }) {
   const { busy, update, remove } = useApplications();
 
-  const [status, setStatus] = useState(application.status);
-  const [notes, setNotes] = useState(application.notes);
+  const {
+    status,
+    notes,
+    changed,
+    hasConflict,
+    expected,
+    edit,
+    discardDraft,
+    keepDraft,
+  } = useApplicationDraft(application);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -78,8 +87,6 @@ function ApplicationCard({ application }: { application: Application }) {
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
-
-  const changed = status !== application.status || notes !== application.notes;
 
   const statusId = `application-status-${application.id}`;
   const notesId = `application-notes-${application.id}`;
@@ -104,7 +111,7 @@ function ApplicationCard({ application }: { application: Application }) {
   }
 
   async function saveChanges() {
-    if (busy || saving || !changed) {
+    if (busy || saving || !changed || hasConflict) {
       return;
     }
 
@@ -115,6 +122,7 @@ function ApplicationCard({ application }: { application: Application }) {
       const success = await update(application.jobId, {
         status,
         notes,
+        expected,
       });
 
       if (success) {
@@ -164,7 +172,7 @@ function ApplicationCard({ application }: { application: Application }) {
 
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || saving}
             onClick={openDeleteDialog}
             aria-label={`Remove ${application.title} at ${application.company} from tracker`}
             title="Remove application"
@@ -227,9 +235,9 @@ function ApplicationCard({ application }: { application: Application }) {
             <select
               id={statusId}
               value={status}
-              disabled={busy}
+              disabled={busy || saving}
               onChange={(event) => {
-                setStatus(event.target.value as ApplicationStatus);
+                edit({ status: event.target.value as ApplicationStatus });
                 setSaved(false);
               }}
               className={`focus-visible:outline-primary w-full appearance-none rounded-xl border py-3 pr-10 pl-9 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-default disabled:opacity-60 ${selectedStyle.badge}`}
@@ -266,11 +274,11 @@ function ApplicationCard({ application }: { application: Application }) {
             id={notesId}
             value={notes}
             maxLength={5000}
-            disabled={busy}
+            disabled={busy || saving}
             aria-describedby={notesHelpId}
             placeholder="Interview dates, contacts, or next steps…"
             onChange={(event) => {
-              setNotes(event.target.value);
+              edit({ notes: event.target.value });
               setSaved(false);
             }}
             className="application-notes border-border bg-background text-primary focus-visible:outline-primary mt-2 h-36 w-full resize-none overflow-y-auto rounded-xl border px-4 py-3 text-sm leading-relaxed focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-default disabled:opacity-60"
@@ -284,11 +292,49 @@ function ApplicationCard({ application }: { application: Application }) {
 
             <span>{notes.length.toLocaleString("en-US")} / 5,000</span>
           </div>
+          {hasConflict ? (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+              <p role="alert">
+                This application changed since you started editing. Your draft
+                is preserved. Choose which version to use before saving.
+              </p>
 
+              <div className="mt-3 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  disabled={busy || saving}
+                  onClick={() => {
+                    discardDraft();
+                    setSaved(false);
+                  }}
+                  className="rounded underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
+                >
+                  Use latest saved version
+                </button>
+
+                <button
+                  type="button"
+                  disabled={busy || saving}
+                  onClick={() => {
+                    keepDraft();
+                    setSaved(false);
+                  }}
+                  className="rounded underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
+                >
+                  Keep my draft
+                </button>
+              </div>
+
+              <p className="mt-2 text-xs">
+                Keeping your draft allows your next save to replace the latest
+                saved status and notes.
+              </p>
+            </div>
+          ) : null}
           <div className="mt-auto flex flex-wrap items-center gap-3 pt-5">
             <button
               type="submit"
-              disabled={busy || saving || !changed}
+              disabled={busy || saving || !changed || hasConflict}
               className="bg-primary text-background focus-visible:outline-primary inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-default disabled:opacity-40"
             >
               <FiCheck aria-hidden="true" className="h-4 w-4" />
