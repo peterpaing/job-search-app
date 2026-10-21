@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Job } from "./JobCard";
+import { apiRequest } from "../lib/api-request";
 
 export type SavedJob = Job & {
   savedAt: string;
@@ -78,17 +79,10 @@ function SignedInSavedJobsProvider({
         throw new Error("Please sign in again.");
       }
 
-      const url = new URL(
-        `/api/saved-jobs${path}`,
-        process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5000",
-      );
-
-      const response = await fetch(url, {
+      const response = await apiRequest({
+        path: `/api/saved-jobs${path}`,
+        token,
         method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        cache: "no-store",
         signal: AbortSignal.timeout(15_000),
       });
 

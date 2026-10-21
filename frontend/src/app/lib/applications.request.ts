@@ -1,3 +1,4 @@
+import { apiRequest } from "./api-request";
 import type { ApplicationUpdate } from "./applications.types";
 
 type ApplicationRequestOptions = {
@@ -31,22 +32,13 @@ export async function requestApplications({
     throw new Error("Sign in to manage applications.");
   }
 
-  const response = await fetch(
-    new URL(
-      `/api/applications${path}`,
-      process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5000",
-    ),
-    {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      cache: "no-store",
-      signal: AbortSignal.timeout(15_000),
-    },
-  );
+  const response = await apiRequest({
+    path: `/api/applications${path}`,
+    token,
+    method,
+    body,
+    signal: AbortSignal.timeout(15_000),
+  });
 
   // The provider handles the latest record returned with a stale-save conflict.
   if (response.status === 409 && method === "PATCH") {

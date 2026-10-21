@@ -7,6 +7,8 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
+import { apiRequest } from "./api-request";
+import { readOwnedSessionToken } from "./owned-session-token";
 import type { Access } from "./smart-match.types";
 import {
   readAnswerStream,
@@ -57,7 +59,7 @@ export function useSmartMatchRequest({
         throw new Error("Please sign in again.");
       }
 
-      const token = await session.getToken();
+      const token = await readOwnedSessionToken(clerk, userId, sessionId);
 
       ensureCurrent();
 
@@ -71,29 +73,15 @@ export function useSmartMatchRequest({
       const timeout = setTimeout(() => controller.abort(), 45_000);
 
       try {
-        const url = new URL(
-          `/api/smart-match${path}`,
-          process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5000",
-        );
-
-        const response = await fetch(url, {
+        const response = await apiRequest({
+          path: `/api/smart-match${path}`,
+          token,
           method,
-          cache: "no-store",
+          body,
           signal: cancellation
             ? AbortSignal.any([controller.signal, cancellation])
             : controller.signal,
-
-          headers: {
-            Authorization: `Bearer ${token}`,
-
-            ...(body !== undefined
-              ? { "Content-Type": "application/json" }
-              : {}),
-
-            ...(onAnswerDelta ? { Accept: "application/x-ndjson" } : {}),
-          },
-
-          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+          accept: onAnswerDelta ? "application/x-ndjson" : undefined,
         });
 
         ensureCurrent();
