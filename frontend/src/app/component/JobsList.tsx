@@ -119,7 +119,7 @@ export default function JobsList({ jobs, page, totalPages }: JobsListProps) {
       aria-label={`Job results, page ${page} of ${totalPages}`}
       tabIndex={-1}
       aria-busy={isPending}
-      className="focus:outline-primary scroll-mt-24 rounded-lg focus:outline-2 focus:outline-offset-4"
+      className="focus-visible:outline-primary scroll-mt-24 rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-solid"
     >
       <div className="grid content-start gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {jobs.map((job) => (
