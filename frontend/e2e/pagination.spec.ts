@@ -306,6 +306,12 @@ test("keyboard pagination focuses the newly loaded results", async ({
       exact: true,
     }),
   ).toBeFocused();
+  await expect(
+    page.getByRole("region", {
+      name: "Job results, page 2 of 2",
+      exact: true,
+    }),
+  ).toHaveCSS("outline-style", "solid");
 });
 
 test("opening a shared results page does not automatically focus the results", async ({
@@ -320,4 +326,24 @@ test("opening a shared results page does not automatically focus the results", a
 
   await expect(results).toBeVisible();
   await expect(results).not.toBeFocused();
+});
+test("mouse pagination does not outline the results container", async ({
+  page,
+}) => {
+  await page.goto("/?q=react&location=Singapore");
+
+  await page
+    .getByRole("button", {
+      name: "Page 2",
+      exact: true,
+    })
+    .click();
+
+  const results = page.getByRole("region", {
+    name: "Job results, page 2 of 2",
+    exact: true,
+  });
+
+  await expect(results).toBeFocused();
+  await expect(results).toHaveCSS("outline-style", "none");
 });
