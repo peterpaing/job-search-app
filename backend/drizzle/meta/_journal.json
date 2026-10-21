@@ -85,6 +85,13 @@
       "when": 1792188033551,
       "tag": "0011_account-deletion",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792606816088,
+      "tag": "0012_job-search-indexes",
+      "breakpoints": true
     }
   ]
 }

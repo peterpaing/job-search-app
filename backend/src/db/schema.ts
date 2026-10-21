@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -59,6 +60,43 @@ export const jobs = pgTable(
   (table) => [
     index("jobs_source_idx").on(table.source),
     index("jobs_posted_at_idx").on(table.postedAt),
+
+    index("jobs_active_title_trgm_idx")
+      .using("gin", table.title.op("gin_trgm_ops"))
+      .where(sql`${table.isActive} = true`),
+
+    index("jobs_active_company_trgm_idx")
+      .using("gin", table.company.op("gin_trgm_ops"))
+      .where(sql`${table.isActive} = true`),
+
+    index("jobs_active_location_trgm_idx")
+      .using("gin", table.location.op("gin_trgm_ops"))
+      .where(sql`${table.isActive} = true`),
+
+    index("jobs_active_country_trgm_idx")
+      .using("gin", table.country.op("gin_trgm_ops"))
+      .where(sql`${table.isActive} = true`),
+
+    index("jobs_active_tags_trgm_idx")
+      .using(
+        "gin",
+        sql`public.stackwing_job_tag_text(${table.tags}) gin_trgm_ops`,
+      )
+      .where(sql`${table.isActive} = true`),
+
+    index("jobs_active_listing_order_idx")
+      .on(
+        sql`(CASE ${table.source}
+          WHEN 'Himalayas' THEN 1
+          WHEN 'Dev Global Jobs' THEN 2
+          WHEN 'We Work Remotely' THEN 3
+          WHEN 'Remote OK' THEN 4
+          ELSE 5
+        END)`,
+        table.postedAt.desc(),
+        table.id.asc(),
+      )
+      .where(sql`${table.isActive} = true`),
   ],
 );
 

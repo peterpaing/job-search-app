@@ -50,13 +50,18 @@ function buildJobsWhere(filters: JobsQuery): SQL {
 
     const keywordCondition = or(
       ilike(jobs.title, pattern),
-      sql`
-        EXISTS (
-          SELECT 1
-          FROM unnest(${jobs.tags}) AS job_tag(value)
-          WHERE job_tag.value ILIKE ${pattern}
-        )
-      `,
+      and(
+        // Indexed candidate filter. Joining tags can create false positives,
+        // so the individual-tag check below remains authoritative.
+        sql`public.stackwing_job_tag_text(${jobs.tags}) ILIKE ${pattern}`,
+        sql`
+          EXISTS (
+            SELECT 1
+            FROM unnest(${jobs.tags}) AS job_tag(value)
+            WHERE job_tag.value ILIKE ${pattern}
+          )
+        `,
+      ),
     );
 
     if (keywordCondition) {
