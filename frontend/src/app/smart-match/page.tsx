@@ -1,196 +1,31 @@
 "use client";
 
 import { useAuth, useClerk } from "@clerk/nextjs";
-import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FaCrown } from "react-icons/fa";
-import {
-  FiCheck,
-  FiFileText,
-  FiRefreshCw,
-  FiTrash2,
-  FiUpload,
-  FiZap,
-} from "react-icons/fi";
-import JobCard, { type Job } from "../component/JobCard";
+import { FiCheck, FiFileText, FiTrash2, FiUpload, FiZap } from "react-icons/fi";
+import type { Job } from "../component/JobCard";
 import TagInput, { mergeTags } from "../component/TagInput";
 import SmartMatchChat from "../component/SmartMatchChat";
 import PremiumPreview from "../component/PremiumPreview";
 import SmartMatchUsage, {
   type SmartMatchUsageData,
 } from "../component/SmartMatchUsage";
+import LoadingPanel from "../component/SmartMatchLoading";
+import SmartMatchResults from "../component/SmartMatchResults";
 import { readResumeFile } from "../lib/resume-file";
-
-type Profile = {
-  skills: string[];
-  roles: string[];
-  experience: "not-specified" | "junior" | "mid" | "senior";
-  location: string;
-  workMode: "any" | "remote" | "hybrid" | "on-site";
-};
-
-type Access = {
-  premium: boolean;
-  aiEnabled: boolean;
-  dailyLimit: number;
-};
-
-type ProfileState = {
-  profile: Profile | null;
-  usage: SmartMatchUsageData;
-};
-
-type Match = {
-  job: Job;
-  matchedSkills: string[];
-  strength: "strong" | "partial" | "related";
-  workMode: "remote" | "hybrid" | "on-site" | "unknown";
-};
-
-type MatchesResponse = {
-  matches: Match[];
-  searched: number;
-};
-
-type BootstrapResponse = {
-  access: Access;
-  profile: Profile | null;
-  usage: SmartMatchUsageData | null;
-  matches: Match[];
-  searched: number;
-};
-
-type ExtractionResponse = {
-  draft: Profile;
-  cached: boolean;
-  usage: SmartMatchUsageData;
-};
-
-type AnswerResponse = {
-  answer: string;
-  cached: boolean;
-  outOfScope?: boolean;
-  usage: SmartMatchUsageData;
-};
-
-async function readAnswerStream<T>(
-  response: Response,
-  onDelta: (delta: string) => void,
-  ensureCurrent: () => void,
-): Promise<T> {
-  if (!response.body) {
-    throw new Error("SmartMatch couldn’t complete this request.");
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-
-  let buffer = "";
-  let receivedBytes = 0;
-
-  function consumeLine(line: string): { result: T } | undefined {
-    if (!line.trim()) {
-      return;
-    }
-
-    const event: unknown = JSON.parse(line);
-
-    if (typeof event !== "object" || event === null || !("type" in event)) {
-      throw new Error("SmartMatch couldn’t complete this request.");
-    }
-
-    if (
-      event.type === "delta" &&
-      "delta" in event &&
-      typeof event.delta === "string"
-    ) {
-      onDelta(event.delta);
-      return;
-    }
-
-    if (
-      event.type === "done" &&
-      "result" in event &&
-      typeof event.result === "object" &&
-      event.result !== null &&
-      "answer" in event.result &&
-      typeof event.result.answer === "string" &&
-      "cached" in event.result &&
-      typeof event.result.cached === "boolean" &&
-      "usage" in event.result
-    ) {
-      return { result: event.result as T };
-    }
-
-    if (event.type === "error") {
-      const status =
-        "status" in event && typeof event.status === "number"
-          ? event.status
-          : 502;
-
-      const message =
-        "message" in event && typeof event.message === "string"
-          ? event.message
-          : "AI couldn’t complete this request. Please try again later.";
-
-      throw new SmartMatchRequestError(status, message);
-    }
-
-    throw new Error("SmartMatch couldn’t complete this request.");
-  }
-
-  try {
-    while (true) {
-      const chunk = await reader.read();
-      ensureCurrent();
-
-      if (chunk.done) {
-        buffer += decoder.decode();
-      } else {
-        receivedBytes += chunk.value.byteLength;
-
-        if (receivedBytes > 2_000_000) {
-          throw new Error("SmartMatch couldn’t complete this request.");
-        }
-
-        buffer += decoder.decode(chunk.value, { stream: true });
-      }
-
-      let newline = buffer.indexOf("\n");
-
-      while (newline !== -1) {
-        const line = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
-
-        const completed = consumeLine(line);
-
-        if (completed) {
-          return completed.result;
-        }
-
-        newline = buffer.indexOf("\n");
-      }
-
-      if (chunk.done) {
-        if (buffer.trim()) {
-          const completed = consumeLine(buffer);
-
-          if (completed) {
-            return completed.result;
-          }
-        }
-
-        // A disconnected stream must not look like a finished answer.
-        throw new Error(
-          "AI couldn’t complete this request. Please try again later.",
-        );
-      }
-    }
-  } finally {
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
-}
+import { useSmartMatchRequest } from "../lib/use-smart-match-request";
+import { readVerifiedSmartMatchAccess } from "../lib/smart-match.transport";
+import type {
+  Access,
+  AnswerResponse,
+  BootstrapResponse,
+  ExtractionResponse,
+  Match,
+  MatchesResponse,
+  Profile,
+  ProfileState,
+} from "../lib/smart-match.types";
 
 const emptyProfile: Profile = {
   skills: [],
@@ -208,98 +43,6 @@ const secondaryButtonClass =
 
 const inputClass =
   "border-border bg-background text-primary focus-visible:outline-primary mt-2 w-full rounded-xl border px-4 py-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60";
-
-class SmartMatchRequestError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = "SmartMatchRequestError";
-  }
-}
-
-function waitForAccessRetry(signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) {
-      reject(new DOMException("Access check cancelled.", "AbortError"));
-      return;
-    }
-
-    function cancel() {
-      window.clearTimeout(timer);
-      signal.removeEventListener("abort", cancel);
-
-      reject(new DOMException("Access check cancelled.", "AbortError"));
-    }
-
-    const timer = window.setTimeout(() => {
-      signal.removeEventListener("abort", cancel);
-      resolve();
-    }, 1500);
-
-    signal.addEventListener("abort", cancel, {
-      once: true,
-    });
-  });
-}
-
-async function readVerifiedSmartMatchAccess<T>(
-  read: () => Promise<T>,
-  signal: AbortSignal,
-): Promise<T> {
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    if (signal.aborted) {
-      throw new DOMException("Access check cancelled.", "AbortError");
-    }
-
-    try {
-      return await read();
-    } catch (failure) {
-      if (signal.aborted) throw failure;
-
-      const retryable =
-        failure instanceof SmartMatchRequestError
-          ? failure.status === 409 ||
-            failure.status === 429 ||
-            failure.status >= 500
-          : failure instanceof TypeError ||
-            (failure instanceof DOMException && failure.name === "AbortError");
-
-      if (!retryable || attempt === 3) {
-        throw failure;
-      }
-
-      await waitForAccessRetry(signal);
-    }
-  }
-
-  throw new Error("Your subscription could not be verified. Please try again.");
-}
-
-function LoadingPanel() {
-  return (
-    <div role="status" aria-label="Loading SmartMatch" aria-busy="true">
-      <span className="sr-only">Loading SmartMatch…</span>
-
-      <div aria-hidden="true" className="motion-safe:animate-pulse">
-        <div className="bg-surface h-9 w-52 rounded-full" />
-        <div className="bg-surface mt-5 h-5 w-3/4 rounded" />
-
-        <div className="mt-8 grid gap-5 sm:grid-cols-2">
-          {Array.from({ length: 4 }, (_, index) => (
-            <div key={index} className="border-border rounded-2xl border p-6">
-              <div className="bg-surface h-7 w-28 rounded-full" />
-              <div className="bg-surface mt-6 h-6 w-3/4 rounded" />
-              <div className="bg-surface mt-4 h-4 w-1/2 rounded" />
-              <div className="bg-surface mt-6 h-24 rounded-xl" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function SmartMatchWorkspace({
   userId,
@@ -357,120 +100,14 @@ function SmartMatchWorkspace({
     };
   }, []);
 
-  const request = useCallback(
-    async <T,>(
-      path: string,
-      method = "GET",
-      body?: unknown,
-      cancellation?: AbortSignal,
-      onAnswerDelta?: (delta: string) => void,
-    ): Promise<T> => {
-      const session = clerk.session;
-
-      function ensureCurrent() {
-        if (
-          cancellation?.aborted ||
-          !mounted.current ||
-          clerk.user?.id !== userId ||
-          clerk.session?.id !== sessionId
-        ) {
-          throw new Error("Your account changed. Please try again.");
-        }
-      }
-
-      ensureCurrent();
-
-      if (session?.id !== sessionId) {
-        throw new Error("Please sign in again.");
-      }
-
-      const token = await session.getToken();
-
-      ensureCurrent();
-
-      if (!token) {
-        throw new Error("Please sign in again.");
-      }
-
-      const controller = new AbortController();
-      controllers.current.add(controller);
-
-      const timeout = setTimeout(() => controller.abort(), 45_000);
-
-      try {
-        const url = new URL(
-          `/api/smart-match${path}`,
-          process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5000",
-        );
-
-        const response = await fetch(url, {
-          method,
-          cache: "no-store",
-          signal: cancellation
-            ? AbortSignal.any([controller.signal, cancellation])
-            : controller.signal,
-
-          headers: {
-            Authorization: `Bearer ${token}`,
-
-            ...(body !== undefined
-              ? { "Content-Type": "application/json" }
-              : {}),
-
-            ...(onAnswerDelta ? { Accept: "application/x-ndjson" } : {}),
-          },
-
-          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-        });
-
-        ensureCurrent();
-
-        if (!response.ok) {
-          const value: unknown = await response.json();
-          ensureCurrent();
-
-          if (response.status === 403) {
-            setAccess((previous) =>
-              previous ? { ...previous, premium: false } : previous,
-            );
-          }
-
-          const message =
-            typeof value === "object" &&
-            value !== null &&
-            "message" in value &&
-            typeof value.message === "string"
-              ? value.message
-              : "SmartMatch couldn’t complete this request.";
-
-          throw new SmartMatchRequestError(response.status, message);
-        }
-
-        if (
-          onAnswerDelta &&
-          response.headers.get("content-type")?.includes("application/x-ndjson")
-        ) {
-          return await readAnswerStream<T>(
-            response,
-            (delta) => {
-              ensureCurrent();
-              onAnswerDelta(delta);
-            },
-            ensureCurrent,
-          );
-        }
-
-        const value: unknown = await response.json();
-        ensureCurrent();
-
-        return value as T;
-      } finally {
-        clearTimeout(timeout);
-        controllers.current.delete(controller);
-      }
-    },
-    [clerk, sessionId, userId],
-  );
+  const request = useSmartMatchRequest({
+    clerk,
+    userId,
+    sessionId,
+    mounted,
+    controllers,
+    setAccess,
+  });
 
   function applyDraft(value: Profile) {
     setDraft(value);
@@ -849,13 +486,6 @@ function SmartMatchWorkspace({
     return <PremiumPreview signedIn />;
   }
 
-  const visibleMatches = exceptionalOnly
-    ? matches.filter((match) => match.strength === "strong")
-    : matches;
-
-  const hiddenByStrengthFilter =
-    exceptionalOnly && matches.length > 0 && visibleMatches.length === 0;
-
   return (
     <>
       <div className="flex flex-wrap items-start justify-between gap-5">
@@ -1225,111 +855,22 @@ function SmartMatchWorkspace({
           </section>
         </div>
       ) : (
-        <section className="mt-7">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h2 className="text-primary text-xl font-semibold">
-                Your matched jobs
-              </h2>
-
-              <p className="text-muted mt-2 max-w-3xl text-xs leading-relaxed">
-                Based on your profile and available listing details.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="text-muted flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={exceptionalOnly}
-                  onChange={(event) => setExceptionalOnly(event.target.checked)}
-                  className="accent-black"
-                />
-                Exceptional matches only
-              </label>
-
-              <button
-                type="button"
-                disabled={busy || matchesLoading}
-                onClick={() => void run(refreshMatches)}
-                className={secondaryButtonClass}
-              >
-                <FiRefreshCw aria-hidden="true" />
-                Refresh
-              </button>
-            </div>
-          </div>
-
-          {matchesLoading ? (
-            <div className="mt-6">
-              <LoadingPanel />
-            </div>
-          ) : visibleMatches.length === 0 ? (
-            <div className="border-border mt-6 flex min-h-[340px] flex-col items-center justify-center rounded-2xl border px-6 py-12 text-center">
-              <FiZap aria-hidden="true" className="text-muted h-7 w-7" />
-
-              <h3 className="text-primary mt-5 text-xl font-semibold">
-                {hiddenByStrengthFilter
-                  ? "No exceptional matches yet"
-                  : "No matching jobs yet"}
-              </h3>
-
-              <p className="text-muted mt-3 max-w-md text-sm">
-                {hiddenByStrengthFilter
-                  ? "Other matches are available. Clear this filter to see them."
-                  : "The available listing details don’t show a match yet. Try broader roles or preferences, or browse all jobs."}
-              </p>
-
-              {hiddenByStrengthFilter ? (
-                <button
-                  type="button"
-                  onClick={() => setExceptionalOnly(false)}
-                  className={`${buttonClass} mt-6`}
-                >
-                  Show all matches
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedJob(null);
-                    setView("profile");
-                  }}
-                  className={`${buttonClass} mt-6`}
-                >
-                  Edit profile
-                </button>
-              )}
-
-              <Link href="/" className={`${secondaryButtonClass} mt-4`}>
-                Explore all jobs
-              </Link>
-            </div>
-          ) : (
-            <>
-              <p className="text-muted mt-6 text-sm">
-                {visibleMatches.length} recommendations from {searched} recent
-                listings
-              </p>
-
-              <div className="mt-5 grid items-stretch gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                {visibleMatches.map((match) => (
-                  <JobCard
-                    key={match.job.id}
-                    job={match.job}
-                    matchDetails={{
-                      strength: match.strength,
-                      workMode: match.workMode ?? "unknown",
-                      matchedSkills: match.matchedSkills,
-                    }}
-                    askDisabled={busy}
-                    onAsk={(trigger) => openJobChat(match.job, trigger)}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-        </section>
+        <SmartMatchResults
+          matches={matches}
+          searched={searched}
+          exceptionalOnly={exceptionalOnly}
+          busy={busy}
+          matchesLoading={matchesLoading}
+          buttonClass={buttonClass}
+          secondaryButtonClass={secondaryButtonClass}
+          onExceptionalChange={setExceptionalOnly}
+          onRefresh={() => void run(refreshMatches)}
+          onEditProfile={() => {
+            setSelectedJob(null);
+            setView("profile");
+          }}
+          onOpenJobChat={openJobChat}
+        />
       )}
 
       {selectedJob && (
