@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import {
   afterEach,
   beforeAll,
@@ -440,5 +440,99 @@ describe("getStoredJobs database integration", () => {
     );
 
     expect(result).toEqual([]);
+  });
+
+  it("has valid active-job search and listing-order indexes", async () => {
+    const result = await db.execute(sql`
+      SELECT
+        index_relation.relname AS name,
+        index_definition.indisvalid AS valid
+      FROM pg_catalog.pg_index AS index_definition
+      JOIN pg_catalog.pg_class AS index_relation
+        ON index_relation.oid = index_definition.indexrelid
+      JOIN pg_catalog.pg_class AS table_relation
+        ON table_relation.oid = index_definition.indrelid
+      JOIN pg_catalog.pg_namespace AS table_namespace
+        ON table_namespace.oid = table_relation.relnamespace
+      WHERE table_namespace.nspname = 'public'
+        AND table_relation.relname = 'jobs'
+        AND index_relation.relname IN (
+          'jobs_active_title_trgm_idx',
+          'jobs_active_company_trgm_idx',
+          'jobs_active_location_trgm_idx',
+          'jobs_active_country_trgm_idx',
+          'jobs_active_tags_trgm_idx',
+          'jobs_active_listing_order_idx'
+        )
+    `);
+
+    expect(result.rows).toHaveLength(6);
+
+    expect(
+      result.rows.map((row) => ({
+        name: row.name,
+        valid: row.valid,
+      })),
+    ).toEqual(
+      expect.arrayContaining(
+        [
+          "jobs_active_title_trgm_idx",
+          "jobs_active_company_trgm_idx",
+          "jobs_active_location_trgm_idx",
+          "jobs_active_country_trgm_idx",
+          "jobs_active_tags_trgm_idx",
+          "jobs_active_listing_order_idx",
+        ].map((name) => ({ name, valid: true })),
+      ),
+    );
+  });
+
+  it.each([
+    ["js", ["javascript", "js"]],
+    ["C++", ["C++", "systems"]],
+    ["react typescript", ["react typescript"]],
+    [String.raw`50%_\Ops`, [String.raw`50%_\Ops`]],
+  ])(
+    "preserves literal individual-tag matches for %s",
+    async (keyword, tags) => {
+      const [matching] = await storeJobs([
+        {
+          title: "Engineering position",
+          tags,
+        },
+        {
+          title: "Engineering position",
+          tags: [],
+        },
+      ]);
+
+      const result = await getStoredJobs(filters({ q: keyword }));
+
+      expectMatchingIds(result, [matching.id]);
+    },
+  );
+
+  it("updates indexed tag matches when tags change", async () => {
+    const [stored] = await storeJobs([
+      {
+        title: "Engineering position",
+        tags: ["react"],
+      },
+    ]);
+
+    expectMatchingIds(await getStoredJobs(filters({ q: "react" })), [
+      stored.id,
+    ]);
+
+    await db
+      .update(jobs)
+      .set({ tags: ["svelte"] })
+      .where(eq(jobs.id, stored.id));
+
+    expect(await getStoredJobs(filters({ q: "react" }))).toEqual([]);
+
+    expectMatchingIds(await getStoredJobs(filters({ q: "svelte" })), [
+      stored.id,
+    ]);
   });
 });

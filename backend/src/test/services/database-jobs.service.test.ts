@@ -207,13 +207,16 @@ describe("getStoredJobs", () => {
 
     const keywordCondition = or(
       ilike(jobs.title, "%React%"),
-      sql`
-        EXISTS (
-          SELECT 1
-          FROM unnest(${jobs.tags}) AS job_tag(value)
-          WHERE job_tag.value ILIKE ${"%React%"}
-        )
-      `,
+      and(
+        sql`public.stackwing_job_tag_text(${jobs.tags}) ILIKE ${"%React%"}`,
+        sql`
+          EXISTS (
+            SELECT 1
+            FROM unnest(${jobs.tags}) AS job_tag(value)
+            WHERE job_tag.value ILIKE ${"%React%"}
+          )
+        `,
+      ),
     );
 
     expectFilter(and(eq(jobs.isActive, true), keywordCondition)!);
@@ -273,13 +276,16 @@ describe("getStoredJobs", () => {
 
     const keywordCondition = or(
       ilike(jobs.title, "%React%"),
-      sql`
-        EXISTS (
-          SELECT 1
-          FROM unnest(${jobs.tags}) AS job_tag(value)
-          WHERE job_tag.value ILIKE ${"%React%"}
-        )
-      `,
+      and(
+        sql`public.stackwing_job_tag_text(${jobs.tags}) ILIKE ${"%React%"}`,
+        sql`
+          EXISTS (
+            SELECT 1
+            FROM unnest(${jobs.tags}) AS job_tag(value)
+            WHERE job_tag.value ILIKE ${"%React%"}
+          )
+        `,
+      ),
     );
 
     expectFilter(
@@ -300,7 +306,7 @@ describe("getStoredJobs", () => {
 
   it.each([
     ["company", 1],
-    ["q", 2],
+    ["q", 3],
     ["location", 2],
   ] as const)(
     "escapes wildcard characters and backslashes in %s",
@@ -337,7 +343,12 @@ describe("getStoredJobs", () => {
 
     const query = actualFilter();
 
-    expect(query.params).toEqual([true, `%${keyword}%`, `%${keyword}%`]);
+    expect(query.params).toEqual([
+      true,
+      `%${keyword}%`,
+      `%${keyword}%`,
+      `%${keyword}%`,
+    ]);
 
     expect(query.sql).not.toContain(keyword);
   });

@@ -178,6 +178,7 @@ describe("getStoredJobsPage", () => {
       "%Example%",
       "%react%",
       "%react%",
+      "%react%",
       "%Singapore%",
       "%Singapore%",
       "2026-10-02T12:00:00.000Z",
