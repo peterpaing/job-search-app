@@ -1,7 +1,6 @@
 "use client";
 
-import { SignInButton, useAuth, useClerk } from "@clerk/nextjs";
-import Link from "next/link";
+import { useAuth, useClerk } from "@clerk/nextjs";
 import {
   createContext,
   useCallback,
@@ -12,39 +11,20 @@ import {
   type ReactNode,
 } from "react";
 import type { Job } from "./JobCard";
+import ApplicationFeedback from "./ApplicationFeedback";
+import {
+  persistVisits,
+  restoreVisits,
+  storageKeyFor,
+} from "../lib/application-visits.storage";
+import { requestApplications } from "../lib/applications.request";
+import type {
+  Application,
+  ApplicationUpdate,
+  PendingVisit,
+} from "../lib/applications.types";
 
-export type ApplicationStatus =
-  "applied" | "interviewing" | "offered" | "rejected";
-
-export type Application = {
-  id: string;
-  jobId: string;
-  title: string;
-  company: string;
-  url: string;
-  status: ApplicationStatus;
-  notes: string;
-  appliedAt: string;
-  updatedAt: string;
-};
-
-type VisitedJob = Pick<Job, "id" | "title" | "company"> & {
-  url?: string;
-};
-
-type PendingVisit = {
-  job: VisitedJob;
-  confirmed: boolean;
-};
-
-type ApplicationUpdate = {
-  status?: ApplicationStatus;
-  notes?: string;
-  expected?: {
-    id: string;
-    updatedAt: string;
-  };
-};
+export type { Application, ApplicationStatus } from "../lib/applications.types";
 
 type ApplicationsContextValue = {
   signedIn: boolean;
@@ -62,106 +42,6 @@ type ApplicationsContextValue = {
 const ApplicationsContext = createContext<ApplicationsContextValue | null>(
   null,
 );
-
-const LEGACY_STORAGE_KEY = "dev-jobs:pending-application-visits:v1";
-
-const GUEST_STORAGE_KEY = "dev-jobs:pending-application-visits:v2:guest";
-
-function storageKeyFor(userId: string | null) {
-  return userId
-    ? `dev-jobs:pending-application-visits:v2:user:${encodeURIComponent(userId)}`
-    : GUEST_STORAGE_KEY;
-}
-
-function readVisits(storageKey: string): PendingVisit[] {
-  try {
-    const value: unknown = JSON.parse(
-      sessionStorage.getItem(storageKey) ?? "[]",
-    );
-
-    if (!Array.isArray(value)) {
-      return [];
-    }
-
-    return value
-      .filter((entry): entry is PendingVisit => {
-        if (!entry || typeof entry !== "object") {
-          return false;
-        }
-
-        const candidate = entry as Partial<PendingVisit>;
-        const job = candidate.job;
-
-        return (
-          typeof candidate.confirmed === "boolean" &&
-          !!job &&
-          typeof job.id === "string" &&
-          typeof job.title === "string" &&
-          typeof job.company === "string" &&
-          (job.url === undefined || typeof job.url === "string")
-        );
-      })
-      .slice(-10);
-  } catch {
-    return [];
-  }
-}
-
-function persistVisits(storageKey: string, visits: PendingVisit[]): boolean {
-  try {
-    if (visits.length === 0) {
-      sessionStorage.removeItem(storageKey);
-    } else {
-      sessionStorage.setItem(storageKey, JSON.stringify(visits));
-    }
-
-    return true;
-  } catch {
-    // In-memory prompts still work without browser storage.
-    return false;
-  }
-}
-
-function restoreVisits(userId: string | null): PendingVisit[] {
-  // Legacy entries have no account owner. Never replay them.
-  try {
-    sessionStorage.removeItem(LEGACY_STORAGE_KEY);
-  } catch {
-    // The legacy key is never read even if removal fails.
-  }
-
-  const storageKey = storageKeyFor(userId);
-  const ownedVisits = readVisits(storageKey);
-
-  if (!userId) {
-    return ownedVisits;
-  }
-
-  // Only an explicit guest Yes can continue after sign-in.
-  const guestChoices = readVisits(GUEST_STORAGE_KEY).filter(
-    (visit) => visit.confirmed,
-  );
-
-  // Consume guest choices before starting any network request.
-  // Another account must not claim the same choices.
-  try {
-    sessionStorage.removeItem(GUEST_STORAGE_KEY);
-  } catch {
-    // Fail closed if guest choices cannot be consumed safely.
-    return ownedVisits;
-  }
-
-  const merged = [
-    ...ownedVisits,
-    ...guestChoices.filter(
-      (guest) => !ownedVisits.some((owned) => owned.job.id === guest.job.id),
-    ),
-  ].slice(-10);
-
-  persistVisits(storageKey, merged);
-
-  return merged;
-}
 
 function sortApplications(records: Application[]) {
   return [...records].sort(
@@ -280,53 +160,15 @@ function ApplicationSession({
   );
 
   const request = useCallback(
-    async (path = "", method = "GET", body?: ApplicationUpdate) => {
-      if (!mounted.current || !signedIn) {
-        throw new Error("This application session is no longer active.");
-      }
-
-      const token = await getToken();
-
-      if (!mounted.current) {
-        throw new Error("This application session is no longer active.");
-      }
-
-      if (!token) {
-        throw new Error("Sign in to manage applications.");
-      }
-
-      const response = await fetch(
-        new URL(
-          `/api/applications${path}`,
-          process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5000",
-        ),
-        {
-          method,
-          headers: {
-            Authorization: `Bearer ${token}`,
-            ...(body ? { "Content-Type": "application/json" } : {}),
-          },
-          ...(body ? { body: JSON.stringify(body) } : {}),
-          cache: "no-store",
-          signal: AbortSignal.timeout(15_000),
-        },
-      );
-      // Let update() handle a version conflict and its latest record.
-      if (response.status === 409 && method === "PATCH") {
-        return response;
-      }
-      if (!response.ok) {
-        if (response.status === 404 && method === "PUT") {
-          throw new Error("This listing is no longer available to track.");
-        }
-
-        throw new Error(
-          "We couldn’t confirm the change. Try again or refresh your applications.",
-        );
-      }
-
-      return response;
-    },
+    async (path = "", method = "GET", body?: ApplicationUpdate) =>
+      requestApplications({
+        path,
+        method,
+        body,
+        signedIn,
+        getToken,
+        isActive: () => mounted.current,
+      }),
     [getToken, signedIn],
   );
 
@@ -792,107 +634,18 @@ function ApplicationSession({
     >
       {children}
 
-      {showPrompt ? (
-        <aside
-          aria-labelledby="application-prompt-title"
-          className="border-border bg-background fixed right-4 bottom-4 left-4 z-50 rounded-2xl border p-5 shadow-lg sm:left-auto sm:w-[380px]"
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2
-                id="application-prompt-title"
-                className="text-primary text-base font-semibold"
-              >
-                Did you apply for this job?
-              </h2>
-
-              <p className="text-muted mt-2 text-sm">
-                {candidate.job.title} · {candidate.job.company}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              aria-label="Dismiss application question"
-              disabled={busy}
-              onClick={() => dismiss(candidate.job.id)}
-              className="text-muted rounded-lg px-2 py-1 disabled:opacity-50"
-            >
-              ✕
-            </button>
-          </div>
-
-          {error ? (
-            <p role="alert" className="mt-3 text-sm text-red-700">
-              {error}
-            </p>
-          ) : null}
-
-          {!signedIn && candidate.confirmed ? (
-            <p className="text-muted mt-3 text-sm">
-              Sign in to add this job. We’ll keep your choice.
-            </p>
-          ) : null}
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            {signedIn ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void track(candidate.job.id)}
-                className="bg-primary text-background rounded-full px-4 py-2 text-sm font-medium disabled:opacity-50"
-              >
-                Yes, I applied
-              </button>
-            ) : (
-              <SignInButton mode="modal">
-                <button
-                  type="button"
-                  onClick={rememberYes}
-                  className="bg-primary text-background rounded-full px-4 py-2 text-sm font-medium"
-                >
-                  {candidate.confirmed
-                    ? "Sign in to continue"
-                    : "Yes, I applied"}
-                </button>
-              </SignInButton>
-            )}
-
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => dismiss(candidate.job.id)}
-              className="border-border text-primary rounded-full border px-4 py-2 text-sm disabled:opacity-50"
-            >
-              Not yet
-            </button>
-          </div>
-        </aside>
-      ) : notice ? (
-        <div
-          role="status"
-          className="border-border bg-background fixed right-4 bottom-4 left-4 z-50 flex items-center justify-between gap-4 rounded-2xl border p-4 shadow-lg sm:left-auto"
-        >
-          <p className="text-primary text-sm">{notice}</p>
-
-          <Link
-            href="/tracker"
-            onClick={() => setNotice(null)}
-            className="text-primary text-sm font-medium underline underline-offset-4"
-          >
-            View application
-          </Link>
-
-          <button
-            type="button"
-            aria-label="Dismiss application notification"
-            onClick={() => setNotice(null)}
-            className="text-muted rounded-lg px-2 py-1"
-          >
-            ✕
-          </button>
-        </div>
-      ) : null}
+      <ApplicationFeedback
+        showPrompt={Boolean(showPrompt)}
+        candidate={candidate}
+        signedIn={signedIn}
+        busy={busy}
+        error={error}
+        notice={notice}
+        onDismiss={dismiss}
+        onTrack={track}
+        onRememberYes={rememberYes}
+        onDismissNotice={() => setNotice(null)}
+      />
     </ApplicationsContext.Provider>
   );
 }
