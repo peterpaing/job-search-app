@@ -124,12 +124,8 @@
           "name": "applications_user_id_users_id_fk",
           "tableFrom": "applications",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -458,12 +454,8 @@
           "name": "saved_jobs_user_id_users_id_fk",
           "tableFrom": "saved_jobs",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -471,12 +463,8 @@
           "name": "saved_jobs_job_id_jobs_id_fk",
           "tableFrom": "saved_jobs",
           "tableTo": "jobs",
-          "columnsFrom": [
-            "job_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["job_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -484,10 +472,7 @@
       "compositePrimaryKeys": {
         "saved_jobs_user_id_job_id_pk": {
           "name": "saved_jobs_user_id_job_id_pk",
-          "columns": [
-            "user_id",
-            "job_id"
-          ]
+          "columns": ["user_id", "job_id"]
         }
       },
       "uniqueConstraints": {},
@@ -534,9 +519,7 @@
         "users_clerk_user_id_unique": {
           "name": "users_clerk_user_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "clerk_user_id"
-          ]
+          "columns": ["clerk_user_id"]
         }
       },
       "policies": {},
@@ -600,12 +583,8 @@
           "name": "smart_match_cache_user_id_users_id_fk",
           "tableFrom": "smart_match_cache",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -613,10 +592,7 @@
       "compositePrimaryKeys": {
         "smart_match_cache_user_id_key_pk": {
           "name": "smart_match_cache_user_id_key_pk",
-          "columns": [
-            "user_id",
-            "key"
-          ]
+          "columns": ["user_id", "key"]
         }
       },
       "uniqueConstraints": {},
@@ -653,12 +629,8 @@
           "name": "smart_match_locks_user_id_users_id_fk",
           "tableFrom": "smart_match_locks",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -699,12 +671,8 @@
           "name": "smart_match_profiles_user_id_users_id_fk",
           "tableFrom": "smart_match_profiles",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -751,10 +719,7 @@
       "compositePrimaryKeys": {
         "smart_match_usage_scope_day_pk": {
           "name": "smart_match_usage_scope_day_pk",
-          "columns": [
-            "scope",
-            "day"
-          ]
+          "columns": ["scope", "day"]
         }
       },
       "uniqueConstraints": {},
@@ -847,12 +812,8 @@
           "name": "billing_customers_user_id_users_id_fk",
           "tableFrom": "billing_customers",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -860,19 +821,14 @@
       "compositePrimaryKeys": {
         "billing_customers_user_id_livemode_pk": {
           "name": "billing_customers_user_id_livemode_pk",
-          "columns": [
-            "user_id",
-            "livemode"
-          ]
+          "columns": ["user_id", "livemode"]
         }
       },
       "uniqueConstraints": {
         "billing_customers_stripe_customer_id_unique": {
           "name": "billing_customers_stripe_customer_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "stripe_customer_id"
-          ]
+          "columns": ["stripe_customer_id"]
         }
       },
       "policies": {},
@@ -989,12 +945,8 @@
           "name": "billing_subscriptions_stripe_customer_id_billing_customers_stripe_customer_id_fk",
           "tableFrom": "billing_subscriptions",
           "tableTo": "billing_customers",
-          "columnsFrom": [
-            "stripe_customer_id"
-          ],
-          "columnsTo": [
-            "stripe_customer_id"
-          ],
+          "columnsFrom": ["stripe_customer_id"],
+          "columnsTo": ["stripe_customer_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1010,12 +962,7 @@
     "public.application_status": {
       "name": "application_status",
       "schema": "public",
-      "values": [
-        "applied",
-        "interviewing",
-        "offered",
-        "rejected"
-      ]
+      "values": ["applied", "interviewing", "offered", "rejected"]
     }
   },
   "schemas": {},
