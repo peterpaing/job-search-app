@@ -240,4 +240,18 @@ describe("getStoredJobsPage", () => {
     expect(filters).toEqual(originalFilters);
     expect(row).toEqual(originalRow);
   });
+  it("selects an empty description instead of reading the description column", async () => {
+    await getStoredJobsPage();
+
+    expect(mocks.select).toHaveBeenCalledTimes(2);
+
+    const selection = mocks.select.mock.calls[1]![0] as {
+      description: SQL;
+    };
+
+    const expression = dialect.sqlToQuery(selection.description);
+
+    expect(expression.sql).toBe("''");
+    expect(expression.params).toEqual([]);
+  });
 });

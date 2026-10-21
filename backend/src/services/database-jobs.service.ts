@@ -91,7 +91,7 @@ function buildJobsWhere(filters: JobsQuery): SQL {
   return conditions.length === 1 ? conditions[0] : and(...conditions)!;
 }
 
-function selectStoredJobs(where: SQL) {
+function selectStoredJobs(where: SQL, summaryOnly = false) {
   const sourcePriority = sql<number>`
     CASE ${jobs.source}
       WHEN 'Himalayas' THEN 1
@@ -109,7 +109,7 @@ function selectStoredJobs(where: SQL) {
       title: jobs.title,
       company: jobs.company,
       companyLogo: jobs.companyLogo,
-      description: jobs.description,
+      description: summaryOnly ? sql<string>`''` : jobs.description,
       location: jobs.location,
       country: jobs.country,
       tags: jobs.tags,
@@ -171,7 +171,7 @@ export async function getStoredJobsPage(
     };
   }
 
-  const storedJobs = await selectStoredJobs(where)
+  const storedJobs = await selectStoredJobs(where, true)
     .limit(JOBS_PER_PAGE)
     .offset((page - 1) * JOBS_PER_PAGE);
 
