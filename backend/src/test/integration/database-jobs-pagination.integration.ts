@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { db } from "../../db/index.js";
 import { jobs, type NewDatabaseJob } from "../../db/schema.js";
 import { jobsQuerySchema } from "../../schemas/jobs-query.schema.js";
-import { getStoredJobsPage } from "../../services/database-jobs.service.js";
+import {
+  getStoredJobs,
+  getStoredJobsPage,
+} from "../../services/database-jobs.service.js";
 
 let company: string;
 let fixtureIds: string[];
@@ -18,7 +21,7 @@ beforeEach(async () => {
     source: index < 19 ? "Himalayas" : "Remote OK",
     title: `Developer ${index + 1}`,
     company,
-    description: null,
+    description: "Full listing description. ".repeat(2_000),
     location: "Singapore",
     country: "Singapore",
     tags: ["react"],
@@ -104,5 +107,35 @@ describe("getStoredJobsPage database integration", () => {
       pageSize: 18,
       totalPages: 0,
     });
+  });
+  it("omits description content from pages while preserving full records", async () => {
+    const page = await getStoredJobsPage(filters(), 1);
+    const fullRecords = await getStoredJobs(filters());
+
+    expect(page.jobs).toHaveLength(18);
+    expect(fullRecords).toHaveLength(23);
+
+    for (const summary of page.jobs) {
+      const fullRecord = fullRecords.find((job) => job.id === summary.id);
+
+      expect(fullRecord).toBeDefined();
+      expect(fullRecord?.description).toBe(
+        "Full listing description. ".repeat(2_000),
+      );
+
+      expect(summary).toEqual({
+        ...fullRecord,
+        description: "",
+      });
+    }
+
+    const matchingFullRecords = fullRecords.filter((job) =>
+      page.jobs.some((summary) => summary.id === job.id),
+    );
+
+    // Compare the same 18 records, not different-sized result sets.
+    expect(JSON.stringify(page.jobs).length).toBeLessThan(
+      JSON.stringify(matchingFullRecords).length / 10,
+    );
   });
 });
