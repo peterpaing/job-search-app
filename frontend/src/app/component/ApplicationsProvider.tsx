@@ -25,6 +25,7 @@ import type {
 } from "../lib/applications.types";
 
 export type { Application, ApplicationStatus } from "../lib/applications.types";
+import { readOwnedSessionToken } from "../lib/owned-session-token";
 
 type ApplicationsContextValue = {
   signedIn: boolean;
@@ -78,26 +79,11 @@ export default function ApplicationsProvider({
   const signedIn = identityReady && !!isSignedIn && !!userId && !!sessionId;
 
   const getSessionToken = useCallback(async () => {
-    const session = clerk.session;
-
-    if (
-      !signedIn ||
-      !session ||
-      session.id !== sessionId ||
-      clerk.user?.id !== userId
-    ) {
+    if (!signedIn) {
       return null;
     }
 
-    // This resource belongs to the captured session.
-    const token = await session.getToken();
-
-    // Account switching may happen while token retrieval is pending.
-    if (clerk.session?.id !== sessionId || clerk.user?.id !== userId) {
-      return null;
-    }
-
-    return token;
+    return readOwnedSessionToken(clerk, userId, sessionId);
   }, [clerk, sessionId, signedIn, userId]);
 
   return (
