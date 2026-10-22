@@ -1,6 +1,75 @@
 # StackWing
 
-StackWing is a job-search application with saved jobs, an applications tracker, SmartMatch, and subscription billing.
+**Developer jobs from multiple boards, brought together in one workspace.**
+
+[Visit StackWing](https://stackwingjobs.com) · [Privacy Policy](https://stackwingjobs.com/privacy) · [Terms of Service](https://stackwingjobs.com/terms)
+
+## Why I built this
+
+I started building StackWing while looking for developer jobs myself. I kept switching between LinkedIn and other job boards, searching for similar roles and setting the same filters again. I also wanted somewhere to save interesting jobs and keep track of where I had applied.
+
+StackWing started as a way to make that process easier for me. It brings listings from selected job boards into one place, with tools to organize applications and understand how a role fits your profile.
+
+It is an early version, and feedback is welcome.
+
+## What it does
+
+- **Search across job boards:** browse and filter developer jobs from Himalayas, Dev Global Jobs, We Work Remotely, and Remote OK.
+- **Save jobs:** keep a shortlist of roles you want to revisit.
+- **Track applications:** organize application statuses and private notes.
+- **SmartMatch:** explore relevant listings based on your skills, experience, and preferences.
+- **Resume-assisted profiles:** extract text from a supported resume locally, review it, and optionally use AI to draft a profile.
+- **Job-specific AI chat:** ask about a role with the listing and your profile already in context, without copying the description into another tool.
+- **Account and billing controls:** manage subscriptions and request account deletion.
+
+SmartMatch uses profile-based matching against listings available within StackWing. AI assists with profile extraction and job questions; it does not search the entire internet or guarantee a job match. AI output should be reviewed.
+
+StackWing does not import LinkedIn listings. Source coverage depends on import limits, source availability, and developer-role filtering. Some features require Pro and remain subject to usage limits.
+
+## Screenshots
+
+The image links below become available after the screenshots are added to `docs/images/`. Use a demo account and remove personal information, private notes, payment details, and owner-only usage panels before publishing images.
+
+### Explore jobs
+
+![StackWing job search and source filters](docs/images/explore.png)
+
+<details>
+<summary>SmartMatch, AI chat, and application tracking</summary>
+
+### SmartMatch
+
+![SmartMatch results based on a developer profile](docs/images/smartmatch.png)
+
+### Job-specific AI chat
+
+![Questions about a role with its listing and profile in context](docs/images/job-chat.png)
+
+### Application tracker
+
+![Application statuses and tracking in StackWing](docs/images/applications.png)
+
+</details>
+
+## Tech stack
+
+| Area | Technologies |
+| --- | --- |
+| Frontend | Next.js, React, TypeScript, Tailwind CSS |
+| Backend | Node.js, Express, TypeScript, Zod |
+| Database | PostgreSQL on Neon, Drizzle ORM and migrations |
+| Authentication | Clerk |
+| Payments | Stripe subscriptions, customer portal, and webhooks |
+| AI | OpenAI API for profile extraction and job chat |
+| Testing | Vitest, Playwright, Testing Library, axe-core |
+| Deployment | Docker images hosted on Render |
+| Automation | GitHub Actions for CI, scheduled job refresh, and billing synchronization |
+
+## Deployment status
+
+The frontend and backend are currently deployed manually in Render. Optional deployment automation exists in GitHub Actions, but it must be deliberately enabled and configured. A successful CI run does not by itself mean a production deployment occurred.
+
+See [Operations](docs/OPERATIONS.md) for release, migration, billing, and recovery procedures. Application rollbacks do not undo database migrations.
 
 ## Project structure
 
@@ -200,3 +269,5 @@ See `docs/OPERATIONS.md` for deployment, environment separation, billing, and re
 - CI deployment requests do not automatically verify subsequent application health.
 
 Respect each job source's current attribution, licensing, and commercial-use requirements.
+
+
